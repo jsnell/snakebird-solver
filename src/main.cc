@@ -11,10 +11,13 @@ enum Direction {
     MAX_DIR
 };
 
+template<int H, int W>
 class Snake {
 public:
     Snake(int id, int r, int c)
-        : id_(id), r_(r), c_(c) {
+        : id_(id),
+          i_(r * W + c) {
+        assert(i_ < H * W);
     }
 
     void grow(Direction dir) {
@@ -23,10 +26,10 @@ public:
 
     void move(Direction dir) {
         switch (dir) {
-        case UP: --r_; break;
-        case RIGHT: ++c_; break;
-        case DOWN: ++r_; break;
-        case LEFT: --c_; break;
+        case UP: i_ -= W; break;
+        case RIGHT: ++i_; break;
+        case DOWN: i_ += W; break;
+        case LEFT: --i_; break;
         default: assert(false);
         }
         tail_.push_front(dir);
@@ -34,26 +37,26 @@ public:
     }
 
     int id_;
-    int r_;
-    int c_;
+    int i_;
     std::deque<Direction> tail_;
 };
 
+template<int H, int W>
 class State {
 public:
-    State(const char* map, int r, int c)
-        : map_(strdup(map)),
-          r_(r),
-          c_(c) {
-        assert(strlen(map) == r * c);
-        snake_map_ = new char[r * c];
+    using Snake = ::Snake<H, W>;
+
+    State(const char* map)
+        : map_(strdup(map)) {
+        assert(strlen(map) == H * W);
+        snake_map_ = new char[H * W];
     }
 
     void print() {
-        for (int i = 0; i < r_; ++i) {
-            for (int j = 0; j < c_; ++j) {
+        for (int i = 0; i < H; ++i) {
+            for (int j = 0; j < W; ++j) {
                 printf("%c",
-                       snake_map_[i * c_ + j] ^ map_[i * c_ + j]);
+                       snake_map_[i * W + j] ^ map_[i * W + j]);
             }
             printf("\n");
         }
@@ -82,18 +85,17 @@ public:
     }
 
     bool is_valid_move(Snake* snake, Direction dir) {
-        int r = snake->r_;
-        int c = snake->c_;
+        int i = snake->i_;
 
         switch (dir) {
-        case UP: --r; break;
-        case RIGHT: ++c; break;
-        case DOWN: ++r; break;
-        case LEFT: --c; break;
+        case UP: i -= W; break;
+        case RIGHT: ++i; break;
+        case DOWN: i += W; break;
+        case LEFT: --i; break;
         default: assert(false);
         }
 
-        if ((snake_map_[r * c_ + c] ^ map_[r * c_ + c]) == ' ') {
+        if ((snake_map_[i] ^ map_[i]) == ' ') {
             return true;
         }
 
@@ -107,7 +109,7 @@ public:
             draw_snakes();
             for (auto snake : snakes_) {
                 if (!snake_is_supported(snake)) {
-                    snake->r_++;
+                    snake->i_ += W;
                     again = true;
                 }
             }
@@ -134,27 +136,27 @@ public:
     // - Then for each snake try to trace through the support
     //   graph all the way to the ground.
     bool snake_is_supported(Snake* snake) {
-        int r = snake->r_ + 1;
-        int c = snake->c_;
+        // The space below the snake's head.
+        int below = snake->i_ + W;
 
-        if ((snake_map_[r * c_ + c] != '\0' &&
-             snake_map_[r * c_ + c] != snake->id_) ||
-            (map_[r * c_ + c] != ' ')) {
+        if ((snake_map_[below] != '\0' &&
+             snake_map_[below] != snake->id_) ||
+            (map_[below] != ' ')) {
             return true;
         }
 
         for (auto dir : snake->tail_) {
             switch (dir) {
-            case DOWN: --r; break;
-            case LEFT: ++c; break;
-            case UP: ++r; break;
-            case RIGHT: --c; break;
+            case DOWN: below -= W; break;
+            case LEFT: ++below; break;
+            case UP: below += W; break;
+            case RIGHT: --below; break;
             default: assert(false);
             }
 
-            if ((snake_map_[r * c_ + c] != '\0' &&
-                 snake_map_[r * c_ + c] != snake->id_) ||
-                (map_[r * c_ + c] != ' ')) {
+            if ((snake_map_[below] != '\0' &&
+                 snake_map_[below] != snake->id_) ||
+                (map_[below] != ' ')) {
                 return true;
             }
         }
@@ -163,35 +165,31 @@ public:
     }
 
     void draw_snakes() {
-        memset(snake_map_, 0, r_ * c_);
+        memset(snake_map_, 0, H * W);
         for (auto snake : snakes_) {
             draw_snake(snake);
         }
     }
 
     void draw_snake(Snake* snake) {
-        int r = snake->r_;
-        int c = snake->c_;
-
-        snake_map_[r * c_ + c] = snake->id_;
+        int i = snake->i_;
+        snake_map_[i] = snake->id_;
 
         for (auto dir : snake->tail_) {
             switch (dir) {
-            case DOWN: --r; break;
-            case LEFT: ++c; break;
-            case UP: ++r; break;
-            case RIGHT: --c; break;
+            case DOWN: i -= W; break;
+            case LEFT: ++i; break;
+            case UP: i += W; break;
+            case RIGHT: --i; break;
             default: assert(false);
             }
-            snake_map_[r * c_ + c] = snake->id_;
+            snake_map_[i] = snake->id_;
         }
     }
 
     std::vector<Snake*> snakes_;
     char* map_;
     char* snake_map_;
-    int r_;
-    int c_;
 };
 
 const char* map =
@@ -200,21 +198,21 @@ const char* map =
     ".     ."
     ".  .. ."
     ".     ."
-    ". *   ."
+    ".     ."
     ".......";
 
 int main() {
-    State state(map, 7, 7);
+    State<7, 7> state(map);
 
-    Snake a('a', 2, 3);
+    Snake<7, 7> a('a', 2, 3);
     a.grow(RIGHT);
     a.grow(DOWN);
     state.add_snake(&a);
 
     state.print();
 
-    for (int i = 0; i < 10; ++i) {
-        state.do_valid_moves([](Snake* snake, Direction dir) {
+    for (int i = 0; i < 100; ++i) {
+        state.do_valid_moves([](Snake<7, 7>* snake, Direction dir) {
                 snake->move(dir);
                 return true;
             });
