@@ -455,9 +455,8 @@ bool search(St start_state, const char* map) {
             });
     }
 
-    printf("%s: examined %ld states\n",
-           win ? "Win" : "No solution",
-           steps);
+    printf("%s\n",
+           win ? "Win" : "No solution");
 
     int moves = 0;
     if (win) {
@@ -468,7 +467,7 @@ bool search(St start_state, const char* map) {
         }
     }
 
-    printf("Used %d moves\n", moves);
+    printf("%ld states, %d moves\n", steps, moves);
 
     return win;
 }
