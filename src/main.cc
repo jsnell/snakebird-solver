@@ -268,7 +268,8 @@ public:
                                          snakes_[s].id_,
                                          snakes_[s].i_,
                                          delta,
-                                         &pushed_ids)) {
+                                         &pushed_ids) &&
+                           !(pushed_ids & (1 << s))) {
                     State new_state(*this);
                     new_state.snakes_[s].move(dir);
                     new_state.do_pushes(pushed_ids, delta);
@@ -296,6 +297,23 @@ public:
                 gadget_offset_[i] += push_delta;
             }
         }
+    }
+
+    bool destroy_if_intersects_water(const Map& map, int pushed_ids) {
+        for (int i = 0; i < SnakeCount; ++i) {
+            if (pushed_ids & (1 << i)) {
+                if (snake_intersects_water(map, snakes_[i]))
+                    return true;
+            }
+        }
+        for (int i = 0; i < GadgetCount; ++i) {
+            if (pushed_ids & (1 << (i + SnakeCount))) {
+                if (gadget_intersects_water(map, i)) {
+                    gadget_offset_[i] = kGadgetDeleted;
+                }
+            }
+        }
+        return false;
     }
 
     bool is_valid_grow(const Map& map,
@@ -375,10 +393,6 @@ public:
                     }
                 }
             }
-        }
-
-        if (*pushed_ids & map_id_to_index(pusher_id)) {
-            return false;
         }
 
         return true;
@@ -472,6 +486,9 @@ public:
                     } else {
                         snake.i_ += W;
                         do_pushes(pushed_while_falling, W);
+                        if (destroy_if_intersects_water(map,
+                                                        pushed_while_falling))
+                            return false;
                         goto again;
                     }
                 }
@@ -494,7 +511,9 @@ public:
                         gadget_offset_[i] = kGadgetDeleted;
                     } else {
                         gadget_offset_[i] += W;
-                        do_pushes(pushed_while_falling, W);
+                        if (destroy_if_intersects_water(map,
+                                                        pushed_while_falling))
+                            return false;
                         goto again;
                     }
                 }
@@ -566,6 +585,8 @@ public:
 
             below -= Snake::apply_direction(snake.tail(j));
         }
+
+        *pushed_while_falling = pushed_ids;
     }
 
     void is_gadget_falling(const Map& map,
@@ -600,12 +621,39 @@ public:
                 *falling_to_death = true;
             }
         }
+
+        *pushed_while_falling = pushed_ids;
     }
 
     bool snake_intersects_exit(const Map& map,
                                const Snake& snake) {
         // Only the head of the snake will trigger an exit
         return snake.i_ == map.exit_;
+    }
+
+    bool snake_intersects_water(const Map& map, const Snake& snake) {
+        int i = snake.i_;
+        for (int j = 0; j < snake.len_; ++j) {
+            if (map[i] == '~')
+                return true;
+            i -= Snake::apply_direction(snake.tail(j));
+        }
+
+        return false;
+    }
+
+    bool gadget_intersects_water(const Map& map,
+                                 int gadget_index) {
+        int offset = gadget_offset_[gadget_index];
+        if (offset == kGadgetDeleted)
+            return false;
+        const auto& gadget = map.gadgets_[gadget_index];
+        for (int j = 0; j < gadget.size_; ++j) {
+            if (map[gadget.i_[j] + offset] == '~')
+                return true;
+        }
+
+        return false;
     }
 
     void draw_snakes(const Map& map, char* snake_map,
@@ -761,54 +809,54 @@ bool search(St start_state, const Map& map) {
     return win;
 }
 
-// #include "level00.h"
-// #include "level01.h"
-// #include "level02.h"
-// #include "level03.h"
-// #include "level04.h"
-// #include "level05.h"
-// #include "level06.h"
-// #include "level07.h"
-// #include "level08.h"
-// #include "level09.h"
-// #include "level10.h"
-// #include "level11.h"
-// #include "level12.h"
-// #include "level13.h"
-// #include "level14.h"
-// #include "level15.h"
-// #include "level16.h"
-// #include "level17.h"
-// #include "level18.h"
+#include "level00.h"
+#include "level01.h"
+#include "level02.h"
+#include "level03.h"
+#include "level04.h"
+#include "level05.h"
+#include "level06.h"
+#include "level07.h"
+#include "level08.h"
+#include "level09.h"
+#include "level10.h"
+#include "level11.h"
+#include "level12.h"
+#include "level13.h"
+#include "level14.h"
+#include "level15.h"
+#include "level16.h"
+#include "level17.h"
+#include "level18.h"
 #include "level19.h"
-// #include "level20.h"
-// #include "level21.h"
-// #include "level22.h"
+#include "level20.h"
+#include "level21.h"
+#include "level22.h"
 
 int main() {
-    // assert(level_00());
-    // assert(level_01());
-    // assert(level_02());
-    // assert(level_03());
-    // assert(level_04());
-    // assert(level_05());
-    // assert(level_06());
-    // assert(level_07());
-    // assert(level_08());
-    // assert(level_09());
-    // assert(level_10());
-    // assert(level_11());
-    // assert(level_12());
-    // assert(level_13());
-    // assert(level_14());
-    // assert(level_15());
-    // assert(level_16());
-    // assert(level_17());
-    // assert(level_18());
-    assert(level_19());
-    // assert(level_20());
-    // assert(level_21());
-    // assert(level_22());
+    assert(level_00());
+    assert(level_01());
+    assert(level_02());
+    assert(level_03());
+    assert(level_04());
+    assert(level_05());
+    assert(level_06());
+    assert(level_07());
+    assert(level_08());
+    assert(level_09());
+    assert(level_10());
+    assert(level_11());
+    assert(level_12());
+    assert(level_13());
+    assert(level_14());
+    assert(level_15());
+    assert(level_16());
+    assert(level_17());
+    assert(level_18());
+    // assert(level_19());
+    assert(level_20());
+    assert(level_21());
+    assert(level_22());
 
     return 0;
 }
