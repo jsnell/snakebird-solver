@@ -6,7 +6,7 @@
 #include <deque>
 #include <functional>
 #include <third-party/cityhash/city.h>
-#include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 template<int H, int W, int MaxLen>
@@ -60,6 +60,9 @@ public:
     using Snake = typename ::Snake<H, W, SnakeMaxLen>;
     using Direction = typename Snake::Direction;
 
+    State() : map_(NULL) {
+    }
+
     State(const char* map)
         : map_(strdup(map)) {
         assert(strlen(map) == H * W);
@@ -68,6 +71,16 @@ public:
     void print() {
         char snake_map[H * W];
         draw_snakes(snake_map);
+
+#if 0
+        for (auto snake : snakes_) {
+            printf("len=%d, i=%d, tail=", snake.len_, snake.i_);
+            for (int j = 0; j < snake.len_ - 1; ++j) {
+                printf(" %d", snake.tail(j));
+            }
+            printf("\n");
+        }
+#endif
 
         for (int i = 0; i < H; ++i) {
             for (int j = 0; j < W; ++j) {
@@ -291,7 +304,7 @@ struct hash {
 
 template<class T>
 struct eq {
-    uint64_t operator()(const T& a, const T& b) const {
+    bool operator()(const T& a, const T& b) const {
         return memcmp(&a, &b, sizeof(a)) == 0;
     }
 };
@@ -308,25 +321,30 @@ const char* map =
 
 int main() {
     using St = State<8, 7, 2, 1, 4>;
-    St state(map);
+    St null_state;
+    St start(map);
     printf("%ld\n", sizeof(St));
 
-    state.set_exit(1, 1);
-    state.add_fruit(4, 2, 0);
-    state.add_fruit(1, 5, 1);
+    start.set_exit(1, 1);
+    start.add_fruit(4, 2, 0);
+    start.add_fruit(1, 5, 1);
 
     St::Snake a('a', 1, 2);
     a.grow(St::Snake::RIGHT);
     a.grow(St::Snake::DOWN);
-    state.add_snake(a, 0);
+    start.add_snake(a, 0);
+
+    start.process_gravity();
 
     std::deque<St> todo;
-    std::unordered_set<St, hash<St>, eq<St>> seen_states;
+    std::unordered_map<St, St, hash<St>, eq<St>> seen_states;
 
-    todo.push_back(state);
-    seen_states.insert(state);
+    todo.push_back(start);
+    seen_states[start] = null_state;
 
     size_t steps = 0;
+
+    St win_state = null_state;
     bool win = false;
 
     while (!todo.empty() && !win) {
@@ -339,17 +357,20 @@ int main() {
             fflush(stdout);
         }
 
-        st.do_valid_moves([&todo, &seen_states, &win](St new_state) {
+        st.do_valid_moves([&st, &todo, &seen_states, &win,
+                           &win_state](St new_state) {
                 if (seen_states.find(new_state) != seen_states.end()) {
                     return false;
                 }
+
+                seen_states[new_state] = st;
+                todo.push_back(new_state);
+
                 if (new_state.win()) {
-                    new_state.print();
+                    win_state = new_state;
                     win = true;
                     return true;
                 }
-                seen_states.insert(new_state);
-                todo.push_back(new_state);
                 return false;
             });
     }
@@ -357,6 +378,13 @@ int main() {
     printf("%s: examined %ld states\n",
            win ? "Win" : "No solution",
            steps);
+
+    if (win) {
+        while (!eq<St>()(win_state, null_state)) {
+            win_state.print();
+            win_state = seen_states[win_state];
+        }
+    }
 
     // a.move(RIGHT);
     // state.print();
