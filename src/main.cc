@@ -69,25 +69,49 @@ public:
     using Snake = typename ::Snake<H, W, SnakeMaxLen>;
     using Direction = typename Snake::Direction;
 
-    State() : State(NULL) {
+    class Map {
+    public:
+        Map(const char* base_map) : exit_(0) {
+            assert(strlen(base_map) == H * W);
+            base_map_ = new char[H * W];
+            int fruit_count = 0;
+            for (int i = 0; i < H * W; ++i) {
+                if (base_map[i] == 'O') {
+                    if (FruitCount) {
+                        fruit_[fruit_count++] = i;
+                    }
+                    base_map_[i] = ' ';
+                } else if (base_map[i] == '*') {
+                    assert(!exit_);
+                    base_map_[i] = ' ';
+                    exit_ = i;
+                } else {
+                    base_map_[i] = base_map[i];
+                }
+            }
+
+            assert(fruit_count == FruitCount);
+            assert(exit_);
+        }
+
+        char operator[](int i) const {
+            return this->base_map_[i];
+        }
+
+        char* base_map_;
+        int exit_;
+        int fruit_[FruitCount];
+    };
+
+
+    State() :
+        win_(0),
+        fruit_((1 << FruitCount) - 1) {
     }
 
-    State(const char* map)
-        : exit_(0) {
-        if (map) {
-            assert(strlen(map) == H * W);
-        }
-        for (auto& fruit : fruit_) {
-            fruit = 0;
-        }
-        for (auto& pad : pad_) {
-            pad = 0;
-        }
-    }
-
-    void print(const char* map) {
+    void print(const Map& map) {
         char snake_map[H * W];
-        draw_snakes(snake_map);
+        draw_snakes(map, snake_map);
 
 #if 0
         for (auto snake : snakes_) {
@@ -102,10 +126,10 @@ public:
         for (int i = 0; i < H; ++i) {
             for (int j = 0; j < W; ++j) {
                 int l = i * W + j;
-                if (l == exit_) {
-                    printf("*");
-                } else if (snake_map[l]) {
+                if (snake_map[l]) {
                     printf("%c", snake_map[l]);
+                } else if (l == map.exit_) {
+                    printf("*");
                 } else {
                     printf("%c", map[l]);
                 }
@@ -121,31 +145,27 @@ public:
         return i + 1;
     }
 
-    int add_fruit(int r, int c, int i) {
-        assert(i < FruitCount);
-        fruit_[i] = r * W + c;
-        return i + 1;
-    }
-
-    void set_exit(int r, int c) {
-        exit_ = r * W + c;
-    }
+    // int add_fruit(int r, int c, int i) {
+    //     assert(i < FruitCount);
+    //     fruit_[i] = r * W + c;
+    //     return i + 1;
+    // }
 
     void delete_fruit(int i) {
-        for (auto& fruit: fruit_) {
-            if (fruit == i) {
-                fruit = 0;
-            }
-        }
+        fruit_ = fruit_ & ~(1 << i);
     }
 
-    void do_valid_moves(const char* map,
+    bool fruit_active(int i) {
+        return (fruit_ & (1 << i)) != 0;
+    }
+
+    void do_valid_moves(const Map& map,
                         std::function<bool(State)> fun) {
         static Direction dirs[] = {
             Snake::UP, Snake::RIGHT, Snake::DOWN, Snake::LEFT,
         };
         char snake_map[H * W];
-        draw_snakes(snake_map);
+        draw_snakes(map, snake_map);
         for (int s = 0; s < SnakeCount; ++s) {
             if (!snakes_[s].len_) {
                 continue;
@@ -154,10 +174,11 @@ public:
                 int delta = Snake::apply_direction(dir);
                 int to = snakes_[s].i_ + delta;
                 int pushed_ids = 0;
-                if (is_valid_grow(snakes_[s], to)) {
+                int fruit_index = 0;
+                if (is_valid_grow(map, snakes_[s], to, &fruit_index)) {
                     State new_state(*this);
                     new_state.snakes_[s].grow(dir);
-                    new_state.delete_fruit(to);
+                    new_state.delete_fruit(fruit_index);
                     if (new_state.process_gravity(map)) {
                         if (fun(new_state)) {
                             return;
@@ -194,9 +215,15 @@ public:
         }
     }
 
-    bool is_valid_grow(const Snake& snake, int to) {
-        for (auto fruit : fruit_) {
-            if (fruit == to) {
+    bool is_valid_grow(const Map& map,
+                       const Snake& snake,
+                       int to,
+                       int* fruit_index) {
+        for (int i = 0; i < FruitCount; ++i) {
+            int fruit = map.fruit_[i];
+            if (fruit_active(i) &&
+                fruit == to) {
+                *fruit_index = i;
                 return true;
             }
         }
@@ -204,7 +231,7 @@ public:
         return false;
     }
 
-    bool is_valid_move(const char* map,
+    bool is_valid_move(const Map& map,
                        const char* snake_map,
                        const Snake& snake, int to) {
         if (!snake_map[to] && map[to] == ' ') {
@@ -214,7 +241,7 @@ public:
         return false;
     }
 
-    bool is_valid_push(const char* map,
+    bool is_valid_push(const Map& map,
                        const char* snake_map,
                        const Snake& snake,
                        int delta,
@@ -232,7 +259,7 @@ public:
         return false;
     }
 
-    bool can_be_pushed(const char* map,
+    bool can_be_pushed(const Map& map,
                        const char* snake_map,
                        const Snake& snake,
                        int delta) {
@@ -262,13 +289,13 @@ public:
         return 0;
     }
 
-    bool process_gravity(const char* map) {
+    bool process_gravity(const Map& map) {
         bool again = true;
         while (again) {
             again = false;
             char snake_map[H * W];
-            check_exits();
-            draw_snakes(snake_map);
+            check_exits(map);
+            draw_snakes(map, snake_map);
             for (auto& snake : snakes_) {
                 if (snake.len_) {
                     bool falling, falling_to_death;
@@ -291,22 +318,33 @@ public:
         return true;
     }
 
-    void check_exits() {
-        for (auto fruit: fruit_) {
-            if (fruit) {
-                return;
-            }
+    void check_exits(const Map& map) {
+        if (fruit_) {
+            // Can't use exits until all fruit are eaten.
+            return;
         }
 
         for (auto& snake : snakes_) {
             if (snake.len_) {
-                if (snake_intersects_exit(snake)) {
+                if (snake_intersects_exit(map, snake)) {
                     snake.len_ = 0;
                     snake.i_ = 0;
                     snake.tail_ = 0;
+                    update_win();
                 }
             }
         }
+    }
+
+    void update_win() {
+        for (auto snake : snakes_) {
+            if (snake.len_) {
+                win_ = 0;
+                return;
+            }
+        }
+
+        win_ = 1;
     }
 
     // Consider snake S supported if there is at least one square
@@ -328,7 +366,7 @@ public:
     //   a) the base map, b) other snakes (and which ones?).
     // - Then for each snake try to trace through the support
     //   graph all the way to the ground.
-    void is_snake_falling(const char* map,
+    void is_snake_falling(const Map& map,
                           const char* snake_map,
                           const Snake& snake,
                           bool* falling,
@@ -354,11 +392,12 @@ public:
         }
     }
 
-    bool snake_intersects_exit(const Snake& snake) {
+    bool snake_intersects_exit(const Map& map,
+                               const Snake& snake) {
         int i = snake.i_;
 
         for (int j = 0; j < snake.len_; ++j) {
-            if (i == exit_) {
+            if (i == map.exit_) {
                 return true;
             }
 
@@ -368,14 +407,14 @@ public:
         return false;
     }
 
-    void draw_snakes(char* snake_map) {
+    void draw_snakes(const Map& map, char* snake_map) {
         memset(snake_map, 0, H * W);
         for (auto snake : snakes_) {
             draw_snake(snake_map, snake);
         }
-        for (auto fruit : fruit_) {
-            if (fruit) {
-                snake_map[fruit] = 'Q';
+        for (int i = 0; i < FruitCount; ++i) {
+            if (fruit_active(i)) {
+                snake_map[map.fruit_[i]] = 'Q';
             }
         }
     }
@@ -389,34 +428,22 @@ public:
         }
     }
 
-    bool win() {
-        for (auto snake : snakes_) {
-            if (snake.len_) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     bool operator==(const State<H, W, FruitCount, SnakeCount, SnakeMaxLen> other) const {
         for (int i = 0; i < SnakeCount; ++i) {
             if (!(snakes_[i] == other.snakes_[i])) {
                 return false;
             }
         }
-        for (int i = 0; i < FruitCount; ++i) {
-            if (fruit_[i] != other.fruit_[i]) {
-                return false;
-            }
+        if (win_ != other.win_ ||
+            fruit_ != other.fruit_) {
+            return false;
         }
         return true;
     }
 
     Snake snakes_[SnakeCount];
-    uint16_t fruit_[FruitCount];
-    uint16_t exit_;
-    uint16_t pad_[(FruitCount + 1) % 2];
+    uint16_t win_;
+    uint16_t fruit_;
 };
 
 template<class T>
@@ -440,8 +467,8 @@ struct eq {
     }
 };
 
-template<class St>
-bool search(St start_state, const char* map) {
+template<class St, class Map>
+bool search(St start_state, const Map& map) {
     printf("%ld\n", sizeof(St));
     St null_state;
 
@@ -469,7 +496,7 @@ bool search(St start_state, const char* map) {
         }
 
         st.do_valid_moves(map,
-                          [&st, &todo, &seen_states, &win,
+                          [&st, &todo, &seen_states, &win, &map,
                            &win_state](St new_state) {
                 if (seen_states.find(new_state) != seen_states.end()) {
                     return false;
@@ -478,7 +505,7 @@ bool search(St start_state, const char* map) {
                 seen_states[new_state] = st;
                 todo.push_back(new_state);
 
-                if (new_state.win()) {
+                if (new_state.win_) {
                     win_state = new_state;
                     win = true;
                     return true;
@@ -492,7 +519,7 @@ bool search(St start_state, const char* map) {
 
     int moves = 0;
     if (win) {
-        while (!eq<St>()(win_state, null_state)) {
+        while (!(win_state == null_state)) {
             win_state.print(map);
             win_state = seen_states[win_state];
             ++moves;
@@ -504,29 +531,20 @@ bool search(St start_state, const char* map) {
     return win;
 }
 
-const char* map =
-    "......."
-    ".     ."
-    ".     ."
-    ".     ."
-    ".  .. ."
-    ".     ."
-    ".     ."
-    ".......";
-
-#include "level00.h"
-#include "level01.h"
-#include "level02.h"
-#include "level03.h"
-#include "level04.h"
-#include "level05.h"
-#include "level06.h"
-#include "level07.h"
-#include "level19.h"
+// #include "level00.h"
+// #include "level01.h"
+// #include "level02.h"
+// #include "level03.h"
+// #include "level04.h"
+// #include "level05.h"
+// #include "level06.h"
+// #include "level07.h"
+#include "level08.h"
+// #include "level19.h"
 #include "level21.h"
 
 int main() {
-    level_07();
+    level_21();
 
     return 0;
 }

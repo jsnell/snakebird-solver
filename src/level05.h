@@ -1,9 +1,9 @@
 bool level_05() {
-    const char* map =
+    const char* base_map =
         "........"     
-        ".      ."
+        ".   *  ."
         ". .    ."
-        ".    . ."
+        ".O  O. ."
         ".      ."
         ".~.  . ."
         ".   ~~ ."
@@ -11,11 +11,8 @@ bool level_05() {
         "~~~~~~~~";        
 
     using St = State<9, 8, 2, 1, 5>;
-    St st(map);
-    st.add_fruit(3, 1, 0);
-    st.add_fruit(3, 4, 1);
-
-    st.set_exit(1, 4);
+    St::Map map(base_map);
+    St st;
 
     St::Snake red { 'R', 7, 2 };
     red.grow(St::Snake::UP);

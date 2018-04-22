@@ -1,7 +1,7 @@
 bool level_07() {
-    const char* map =
+    const char* base_map =
         ".............."        
-        ".            ."
+        ".       *    ."
         ".            ."
         ".    .       ."
         ".            ."
@@ -13,8 +13,8 @@ bool level_07() {
         "~~~~~~~~~~~~~~";
 
     using St = State<11, 14, 0, 2, 4>;
-    St st(map);
-    st.set_exit(1, 8);
+    St::Map map(base_map);
+    St st;
 
     St::Snake green { 'G', 8, 10 };
     green.grow(St::Snake::LEFT);
