@@ -71,8 +71,14 @@ public:
 
         for (int i = 0; i < H; ++i) {
             for (int j = 0; j < W; ++j) {
-                printf("%c",
-                       snake_map[i * W + j] ^ map_[i * W + j]);
+                int l = i * W + j;
+                if (l == exit_) {
+                    printf("*");
+                } else if (snake_map[l]) {
+                    printf("%c", snake_map[l]);
+                } else {
+                    printf("%c", map_[l]);
+                }
             }
             printf("\n");
         }
@@ -91,6 +97,10 @@ public:
         return i + 1;
     }
 
+    void set_exit(int r, int c) {
+        exit_ = r * W + c;
+    }
+
     void delete_fruit(int i) {
         for (auto& fruit: fruit_) {
             if (fruit == i) {
@@ -106,6 +116,9 @@ public:
         char snake_map[H * W];
         draw_snakes(snake_map);
         for (int s = 0; s < SnakeCount; ++s) {
+            if (!snakes_[s].len_) {
+                continue;
+            }
             for (auto dir : dirs) {
                 int to = snakes_[s].i_ + Snake::apply_direction(dir);
                 if (is_valid_grow(snakes_[s], to)) {
@@ -153,14 +166,32 @@ public:
         do {
             again = false;
             char snake_map[H * W];
+            check_exits();
             draw_snakes(snake_map);
             for (auto& snake : snakes_) {
-                if (!snake_is_supported(snake_map, snake)) {
+                if (snake.len_ &&
+                    !snake_is_supported(snake_map, snake)) {
                     snake.i_ += W;
                     again = true;
                 }
             }
         } while (again);
+    }
+
+    void check_exits() {
+        for (auto fruit: fruit_) {
+            if (fruit) {
+                return;
+            }
+        }
+
+        for (auto& snake : snakes_) {
+            if (snake.len_) {
+                if (snake_intersects_exit(snake)) {
+                    snake.len_ = 0;
+                }
+            }
+        }
     }
 
     // Consider snake S supported if there is at least one square
@@ -199,6 +230,20 @@ public:
         return false;
     }
 
+    bool snake_intersects_exit(const Snake& snake) {
+        int i = snake.i_;
+
+        for (int j = 0; j < snake.len_; ++j) {
+            if (i == exit_) {
+                return true;
+            }
+
+            i -= Snake::apply_direction(snake.tail(j));
+        }
+
+        return false;
+    }
+
     void draw_snakes(char* snake_map) {
         memset(snake_map, 0, H * W);
         for (auto snake : snakes_) {
@@ -220,9 +265,20 @@ public:
         }
     }
 
+    bool win() {
+        for (auto snake : snakes_) {
+            if (snake.len_) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     char* map_;
     Snake snakes_[SnakeCount];
-    int fruit_[FruitCount];
+    uint16_t fruit_[FruitCount];
+    uint16_t exit_;
     // FIXME potential padding, might cause hash / eq issues if nonzero
 };
 
@@ -253,8 +309,9 @@ const char* map =
 int main() {
     using St = State<8, 7, 2, 1, 4>;
     St state(map);
-    // printf("%ld\n", sizeof(St));
+    printf("%ld\n", sizeof(St));
 
+    state.set_exit(1, 1);
     state.add_fruit(4, 2, 0);
     state.add_fruit(1, 5, 1);
 
@@ -263,8 +320,6 @@ int main() {
     a.grow(St::Snake::DOWN);
     state.add_snake(a, 0);
 
-    state.print();
-
     std::deque<St> todo;
     std::unordered_set<St, hash<St>, eq<St>> seen_states;
 
@@ -272,8 +327,9 @@ int main() {
     seen_states.insert(state);
 
     size_t steps = 0;
+    bool win = false;
 
-    while (!todo.empty()) {
+    while (!todo.empty() && !win) {
         auto st = todo.front();
         todo.pop_front();
 
@@ -283,9 +339,14 @@ int main() {
             fflush(stdout);
         }
 
-        st.do_valid_moves([&todo, &seen_states](St new_state) {
+        st.do_valid_moves([&todo, &seen_states, &win](St new_state) {
                 if (seen_states.find(new_state) != seen_states.end()) {
                     return false;
+                }
+                if (new_state.win()) {
+                    new_state.print();
+                    win = true;
+                    return true;
                 }
                 seen_states.insert(new_state);
                 todo.push_back(new_state);
@@ -293,7 +354,9 @@ int main() {
             });
     }
 
-    printf("Done: examined %ld states\n", steps);
+    printf("%s: examined %ld states\n",
+           win ? "Win" : "No solution",
+           steps);
 
     // a.move(RIGHT);
     // state.print();
