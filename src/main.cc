@@ -530,12 +530,13 @@ bool search(St start_state, const Map& map) {
 // #include "level05.h"
 // #include "level06.h"
 // #include "level07.h"
-#include "level08.h"
+// #include "level08.h"
+#include "level09.h"
 // #include "level19.h"
 #include "level21.h"
 
 int main() {
-    level_21();
+    level_09();
 
     return 0;
 }
