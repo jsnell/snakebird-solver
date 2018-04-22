@@ -403,24 +403,10 @@ const char* map =
 #include "level00.h"
 #include "level01.h"
 #include "level02.h"
+#include "level03.h"
 
 int main() {
-#if 0
-    using St = State<8, 7, 2, 1, 4>;
-    St st(map);
-    printf("%ld\n", sizeof(St));
+    level_03();
 
-    st.set_exit(1, 1);
-    st.add_fruit(4, 2, 0);
-    st.add_fruit(1, 5, 1);
-
-    St::Snake a('a', 1, 2);
-    a.grow(St::Snake::RIGHT);
-    a.grow(St::Snake::DOWN);
-    st.add_snake(a, 0);
-    search(st);
-#else
-    level_02();
-#endif
     return 0;
 }
