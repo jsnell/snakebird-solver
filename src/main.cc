@@ -51,7 +51,13 @@ public:
         return deltas[dir];
     }
 
-    int tail_;
+    bool operator==(const Snake<H, W, MaxLen> other) const {
+        return tail_ == other.tail_ &&
+            i_ == other.i_ &&
+            len_ == other.len_;
+    }
+
+    uint32_t tail_;
     uint16_t i_;
     uint8_t len_;
     uint8_t id_;
@@ -393,6 +399,20 @@ public:
         return true;
     }
 
+    bool operator==(const State<H, W, FruitCount, SnakeCount, SnakeMaxLen> other) const {
+        for (int i = 0; i < SnakeCount; ++i) {
+            if (!(snakes_[i] == other.snakes_[i])) {
+                return false;
+            }
+        }
+        for (int i = 0; i < FruitCount; ++i) {
+            if (fruit_[i] != other.fruit_[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     Snake snakes_[SnakeCount];
     uint16_t fruit_[FruitCount];
     uint16_t exit_;
@@ -402,14 +422,21 @@ public:
 template<class T>
 struct hash {
     uint64_t operator()(const T& key) const {
-        return CityHash64(reinterpret_cast<const char*>(&key), sizeof(key));
+        return CityHash64(reinterpret_cast<const char*>(&key),
+                          sizeof(key));
+        // return CityHash64(reinterpret_cast<const char*>(&key.snakes_),
+        //                   sizeof(key.snakes_));
+        // CityHash64(reinterpret_cast<const char*>(&key.fruit_),
+        //            sizeof(key.fruit_));
+        // const uint32_t* data = reinterpret_cast<const uint32_t*>(&key);
+        // return xxhash32<sizeof(key) / 4>::scalar(data, 0x8fc5249f);
     }
 };
 
 template<class T>
 struct eq {
     bool operator()(const T& a, const T& b) const {
-        return memcmp(&a, &b, sizeof(a)) == 0;
+        return a == b;
     }
 };
 
