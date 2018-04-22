@@ -295,29 +295,53 @@ public:
                        int* pushed_ids) {
         int to = snake.i_ + delta;
 
-        if (snake_map[to] && snake_map[to] != snake.id_) {
-            int index = snake_id_to_index(snake_map[to]);
-            if (can_be_pushed(map, snake_map, snakes_[index], delta)) {
-                *pushed_ids |= 1 << index;
-                return true;
+        if (!snake_map[to] || snake_map[to] == snake.id_) {
+            return false;
+        }
+
+        int index = snake_id_to_index(snake_map[to]);
+        *pushed_ids = 1 << index;
+
+        bool again = true;
+
+        while (again) {
+            again = false;
+            for (int i = 0; i < SnakeCount; ++i) {
+                if (*pushed_ids & (1 << i)) {
+                    int new_pushed_ids = 0;
+                    if (!can_be_pushed(map, snake_map, snakes_[i], delta,
+                                       &new_pushed_ids)) {
+                        return false;
+                    }
+                    if (new_pushed_ids & ~(*pushed_ids)) {
+                        *pushed_ids |= new_pushed_ids;
+                        again = true;
+                    }
+                }
             }
         }
 
-        return false;
+        if (*pushed_ids & snake_id_to_index(snake.id_)) {
+            return false;
+        }
+
+        return true;
     }
 
     bool can_be_pushed(const Map& map,
                        const char* snake_map,
                        const Snake& snake,
-                       int delta) {
+                       int delta,
+                       int* pushed_ids) {
         // The space the Snake's head would be pushed to.
         int to = snake.i_ + delta;
 
         for (int j = 0; j < snake.len_; ++j) {
-            if ((snake_map[to] &&
-                 snake_map[to] != snake.id_) ||
-                (map[to] != ' ')) {
+            if (map[to] != ' ') {
                 return false;
+            }
+            if (snake_map[to] && snake_map[to] != snake.id_) {
+                *pushed_ids |= 1 << snake_id_to_index(snake_map[to]);
             }
             to -= Snake::apply_direction(snake.tail(j));
         }
