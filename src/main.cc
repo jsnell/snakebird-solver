@@ -71,6 +71,9 @@ public:
         for (auto& fruit : fruit_) {
             fruit = 0;
         }
+        for (auto& pad : pad_) {
+            pad = 0;
+        }
     }
 
     void print(const char* map) {
@@ -323,7 +326,7 @@ public:
     Snake snakes_[SnakeCount];
     uint16_t fruit_[FruitCount];
     uint16_t exit_;
-    // FIXME potential padding, might cause hash / eq issues if nonzero
+    uint16_t pad_[(FruitCount + 1) % 2];
 };
 
 template<class T>
