@@ -8,22 +8,16 @@ bool level_06() {
         ".  ...     ."
         ".   .O .   ."
         ".   .     *."
-        ".      .   ."
-        ".  ..~     ."
-        ".   ...    ."
+        ". >B   .   ."
+        ". ^..~     ."
+        ". ^ ...    ."
         ".          ."
         "~~~~~~~~~~~~";
         
 
     using St = State<13, 12, 1, 1, 5>;
     St::Map map(base_map);
-    St st;
-
-    St::Snake blue { 'B', 10, 2 };
-    blue.grow(St::Snake::UP);
-    blue.grow(St::Snake::UP);
-    blue.grow(St::Snake::RIGHT);
-    st.add_snake(blue, 0);
+    St st(map);
 
     st.print(map);
 

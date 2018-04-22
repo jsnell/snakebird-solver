@@ -6,7 +6,7 @@ bool level_01() {
         "..     ."
         ".O  .O.."
         ".      ."
-        ". .    ."
+        ". . >G ."
         ". .... ."
         ". .... ."
         ". ...  ."
@@ -14,12 +14,7 @@ bool level_01() {
 
     using St = State<11, 8, 2, 1, 4>;
     St::Map map(base_map);
-    St st;
-
-    St::Snake green { 'G', 6, 3 };
-    green.grow(St::Snake::RIGHT);
-    st.add_snake(green, 0);
-
+    St st(map);
     st.print(map);
 
     return search(st, map);

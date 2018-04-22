@@ -22,9 +22,9 @@ public:
     Snake() : tail_(0), i_(0), len_(0), id_(0) {
     }
 
-    Snake(int id, int r, int c)
+    Snake(int id, int i)
         : tail_(0),
-          i_(r * W + c),
+          i_(i),
           len_(1),
           id_(id) {
         assert(i_ < H * W);
@@ -75,6 +75,7 @@ public:
             assert(strlen(base_map) == H * W);
             base_map_ = new char[H * W];
             int fruit_count = 0;
+            int snake_count = 0;
             for (int i = 0; i < H * W; ++i) {
                 if (base_map[i] == 'O') {
                     if (FruitCount) {
@@ -85,6 +86,20 @@ public:
                     assert(!exit_);
                     base_map_[i] = ' ';
                     exit_ = i;
+                } else if (base_map[i] == 'R' ||
+                           base_map[i] == 'G' ||
+                           base_map[i] == 'B') {
+                    base_map_[i] = ' ';
+                    Snake snake = Snake(base_map[i], i);
+                    int len = 0;
+                    snake.tail_ = trace_tail(base_map, i, &len);
+                    snake.len_ += len;
+                    snakes_[snake_count++] = snake;
+                } else if (base_map[i] == '>' ||
+                           base_map[i] == '<' ||
+                           base_map[i] == '^' ||
+                           base_map[i] == 'v') {
+                    base_map_[i] = ' ';
                 } else {
                     base_map_[i] = base_map[i];
                 }
@@ -94,6 +109,31 @@ public:
             assert(exit_);
         }
 
+        uint32_t trace_tail(const char* base_map, int i, int* len) {
+            if (base_map[i - 1] == '>') {
+                ++*len;
+                return Snake::RIGHT |
+                    (trace_tail(base_map, i - 1, len) << Snake::kDirWidth);
+            }
+            if (base_map[i + 1] == '<') {
+                ++*len;
+                return Snake::LEFT |
+                    (trace_tail(base_map, i + 1, len) << Snake::kDirWidth);
+            }
+            if (base_map[i - W] == 'v') {
+                ++*len;
+                return Snake::DOWN |
+                    (trace_tail(base_map, i - W, len) << Snake::kDirWidth);
+            }
+            if (base_map[i + W] == '^') {
+                ++*len;
+                return Snake::UP |
+                    (trace_tail(base_map, i + W, len) << Snake::kDirWidth);
+            }
+
+            return 0;
+        }
+
         char operator[](int i) const {
             return this->base_map_[i];
         }
@@ -101,12 +141,19 @@ public:
         char* base_map_;
         int exit_;
         int fruit_[FruitCount];
+        Snake snakes_[SnakeCount];
     };
 
 
     State() :
         win_(0),
         fruit_((1 << FruitCount) - 1) {
+    }
+
+    State(const Map& map) : State() {
+        for (int i = 0; i < SnakeCount; ++i) {
+            snakes_[i] = map.snakes_[i];
+        }
     }
 
     void print(const Map& map) {
@@ -531,12 +578,12 @@ bool search(St start_state, const Map& map) {
 // #include "level06.h"
 // #include "level07.h"
 // #include "level08.h"
-#include "level09.h"
+// #include "level09.h"
 // #include "level19.h"
 #include "level21.h"
 
 int main() {
-    level_09();
+    level_21();
 
     return 0;
 }

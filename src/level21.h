@@ -6,26 +6,17 @@ bool level_21() {
         ".    .    ."
         ".  O   O  ."
         ".         ."
-        ".         ."
-        ".~~~ .  ~~."
-        ".... O ~~.."
-        "...     ..."
+        ".   >B    ."
+        ".~~~^.  ~~."
+        "....^O ~~.."
+        "... ^<  ..."
         "...     ..."
         "...     ..."
         "~~~~~~~~~~~";
 
     using St = State<13, 11, 3, 1, 8>;
     St::Map map(base_map);
-    St st;
-
-    St::Snake blue { 'B', 9, 5 };
-    blue.grow(St::Snake::LEFT);
-    blue.grow(St::Snake::UP);
-    blue.grow(St::Snake::UP);
-    blue.grow(St::Snake::UP);
-    blue.grow(St::Snake::RIGHT);
-    st.add_snake(blue, 0);
-
+    St st(map);
     st.print(map);
 
     return search(st, map);
