@@ -142,7 +142,9 @@ public:
                 continue;
             }
             for (auto dir : dirs) {
-                int to = snakes_[s].i_ + Snake::apply_direction(dir);
+                int delta = Snake::apply_direction(dir);
+                int to = snakes_[s].i_ + delta;
+                int pushed_ids = 0;
                 if (is_valid_grow(snakes_[s], to)) {
                     State new_state(*this);
                     new_state.snakes_[s].grow(dir);
@@ -155,6 +157,24 @@ public:
                 } else if (is_valid_move(map, snake_map, snakes_[s], to)) {
                     State new_state(*this);
                     new_state.snakes_[s].move(dir);
+                    if (new_state.process_gravity(map)) {
+                        if (fun(new_state)) {
+                            return;
+                        }
+                    }
+                } else if (is_valid_push(map, snake_map, snakes_[s],
+                                         delta,
+                                         &pushed_ids)) {
+                    State new_state(*this);
+                    new_state.snakes_[s].move(dir);
+                    for (int i = 0; i < SnakeCount; ++i) {
+                        if (pushed_ids & (1 << i)) {
+                            new_state.snakes_[i].i_ += delta;
+                        }
+                    }
+                    // printf("++\n");
+                    // print(map);
+                    // new_state.print(map);
                     if (new_state.process_gravity(map)) {
                         if (fun(new_state)) {
                             return;
@@ -178,17 +198,64 @@ public:
     bool is_valid_move(const char* map,
                        const char* snake_map,
                        const Snake& snake, int to) {
-        if (!snake_map[to] &&
-            map[to] == ' ') {
+        if (!snake_map[to] && map[to] == ' ') {
             return true;
         }
 
         return false;
     }
 
+    bool is_valid_push(const char* map,
+                       const char* snake_map,
+                       const Snake& snake,
+                       int delta,
+                       int* pushed_ids) {
+        int to = snake.i_ + delta;
+
+        if (snake_map[to] && snake_map[to] != snake.id_) {
+            int index = snake_id_to_index(snake_map[to]);
+            if (can_be_pushed(map, snake_map, snakes_[index], delta)) {
+                *pushed_ids |= 1 << index;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool can_be_pushed(const char* map,
+                       const char* snake_map,
+                       const Snake& snake,
+                       int delta) {
+        // The space the Snake's head would be pushed to.
+        int to = snake.i_ + delta;
+
+        for (int j = 0; j < snake.len_; ++j) {
+            if ((snake_map[to] &&
+                 snake_map[to] != snake.id_) ||
+                (map[to] != ' ')) {
+                return false;
+            }
+            to -= Snake::apply_direction(snake.tail(j));
+        }
+
+        return true;
+    }
+
+    int snake_id_to_index(int id) {
+        for (int i = 0; i < SnakeCount; ++i) {
+            if (id == snakes_[i].id_) {
+                return i;
+            }
+        }
+        printf("%c\n", id);
+        assert(false);
+        return 0;
+    }
+
     bool process_gravity(const char* map) {
-        bool again;
-        do {
+        bool again = true;
+        while (again) {
             again = false;
             char snake_map[H * W];
             check_exits();
@@ -210,7 +277,7 @@ public:
                     }
                 }
             }
-        } while (again);
+        };
 
         return true;
     }
@@ -274,8 +341,6 @@ public:
 
             below -= Snake::apply_direction(snake.tail(j));
         }
-
-        return;
     }
 
     bool snake_intersects_exit(const Snake& snake) {
