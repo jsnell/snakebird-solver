@@ -309,43 +309,22 @@ struct eq {
     }
 };
 
-const char* map =
-    "......."
-    ".     ."
-    ".     ."
-    ".     ."
-    ".  .. ."
-    ".     ."
-    ".     ."
-    ".......";
-
-int main() {
-    using St = State<8, 7, 2, 1, 4>;
+template<class St>
+bool search(St start_state) {
     St null_state;
-    St start(map);
-    printf("%ld\n", sizeof(St));
 
-    start.set_exit(1, 1);
-    start.add_fruit(4, 2, 0);
-    start.add_fruit(1, 5, 1);
+    // Just in case the starting state is invalid.
+    start_state.process_gravity();
 
-    St::Snake a('a', 1, 2);
-    a.grow(St::Snake::RIGHT);
-    a.grow(St::Snake::DOWN);
-    start.add_snake(a, 0);
-
-    start.process_gravity();
-
+    // BFS state
     std::deque<St> todo;
     std::unordered_map<St, St, hash<St>, eq<St>> seen_states;
-
-    todo.push_back(start);
-    seen_states[start] = null_state;
-
     size_t steps = 0;
-
     St win_state = null_state;
     bool win = false;
+
+    todo.push_back(start_state);
+    seen_states[start_state] = null_state;
 
     while (!todo.empty() && !win) {
         auto st = todo.front();
@@ -386,10 +365,38 @@ int main() {
         }
     }
 
-    // a.move(RIGHT);
-    // state.print();
-    // a.move(RIGHT);
-    // state.print();
+    return win;
+}
 
+const char* map =
+    "......."
+    ".     ."
+    ".     ."
+    ".     ."
+    ".  .. ."
+    ".     ."
+    ".     ."
+    ".......";
+
+#include "level00.h"
+
+int main() {
+#if 0
+    using St = State<8, 7, 2, 1, 4>;
+    St st(map);
+    printf("%ld\n", sizeof(St));
+
+    st.set_exit(1, 1);
+    st.add_fruit(4, 2, 0);
+    st.add_fruit(1, 5, 1);
+
+    St::Snake a('a', 1, 2);
+    a.grow(St::Snake::RIGHT);
+    a.grow(St::Snake::DOWN);
+    st.add_snake(a, 0);
+    search(st);
+#else
+    level_00();
+#endif
     return 0;
 }
