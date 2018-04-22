@@ -27,6 +27,7 @@ public:
     }
 
     void grow(Direction dir) {
+        i_ += apply_direction(dir);
         ++len_;
         tail_ = (tail_ << 2) | dir;
     }
@@ -52,7 +53,7 @@ public:
     int tail_;
 };
 
-template<int H, int W, int SnakeCount, int SnakeMaxLen>
+template<int H, int W, int FruitCount, int SnakeCount, int SnakeMaxLen>
 class State {
 public:
     using Snake = typename ::Snake<H, W, SnakeMaxLen>;
@@ -79,7 +80,12 @@ public:
 
     int add_snake(const Snake& snake, int i) {
         snakes_[i] = snake;
-        return i++;
+        return i + 1;
+    }
+
+    int add_fruit(int r, int c, int i) {
+        fruit_[i] = r * W + c;
+        return i + 1;
     }
 
     void do_valid_moves(std::function<bool(State)> fun) {
@@ -90,7 +96,16 @@ public:
         draw_snakes(snake_map);
         for (int s = 0; s < SnakeCount; ++s) {
             for (auto dir : dirs) {
-                if (is_valid_move(snake_map, snakes_[s], dir)) {
+                if (is_valid_grow(snakes_[s], dir)) {
+                    State new_state(*this);
+                    new_state.snakes_[s].grow(dir);
+                    // FIXME
+                    new_state.fruit_[0] = 0;
+                    new_state.process_gravity();
+                    if (fun(new_state)) {
+                        return;
+                    }
+                } else if (is_valid_move(snake_map, snakes_[s], dir)) {
                     State new_state(*this);
                     new_state.snakes_[s].move(dir);
                     new_state.process_gravity();
@@ -100,6 +115,19 @@ public:
                 }
             }
         }
+    }
+
+    bool is_valid_grow(const Snake& snake,
+                       Direction dir) {
+        int i = snake.i_ + Snake::apply_direction(dir);
+
+        for (auto fruit : fruit_) {
+            if (fruit == i) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     bool is_valid_move(const char* snake_map,
@@ -169,17 +197,24 @@ public:
         for (auto snake : snakes_) {
             draw_snake(snake_map, snake);
         }
+        for (auto fruit : fruit_) {
+            if (fruit) {
+                snake_map[fruit] = 'Q';
+            }
+        }
     }
 
     void draw_snake(char* snake_map, const Snake& snake) {
         int i = snake.i_;
         for (int j = 0; j < snake.len_; ++j) {
-            snake_map[i] = snake.id_ ^ (32 * (j == 0));
+            snake_map[i] = snake.id_;
+            // ^ (32 * (j == 0)); // Use different case for head
             i -= Snake::apply_direction(snake.tail(j));
         }
     }
 
     Snake snakes_[SnakeCount];
+    int fruit_[FruitCount];
     char* map_;
 };
 
@@ -207,11 +242,13 @@ const char* map =
     ".......";
 
 int main() {
-    using St = State<7, 7, 1, 4>;
+    using St = State<7, 7, 1, 1, 4>;
     St state(map);
     // printf("%ld\n", sizeof(St));
 
-    St::Snake a('a', 2, 3);
+    state.add_fruit(4, 2, 0);
+
+    St::Snake a('a', 1, 2);
     a.grow(St::Snake::RIGHT);
     a.grow(St::Snake::DOWN);
     state.add_snake(a, 0);
@@ -234,7 +271,6 @@ int main() {
         if (!(steps & 0xffff)) {
             printf(".");
             fflush(stdout);
-            // st.print();
         }
 
         st.do_valid_moves([&todo, &seen_states](St new_state) {
