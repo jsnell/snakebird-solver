@@ -394,17 +394,8 @@ public:
 
     bool snake_intersects_exit(const Map& map,
                                const Snake& snake) {
-        int i = snake.i_;
-
-        for (int j = 0; j < snake.len_; ++j) {
-            if (i == map.exit_) {
-                return true;
-            }
-
-            i -= Snake::apply_direction(snake.tail(j));
-        }
-
-        return false;
+        // Only the head of the snake will trigger an exit
+        return snake.i_ == map.exit_;
     }
 
     void draw_snakes(const Map& map, char* snake_map) {
