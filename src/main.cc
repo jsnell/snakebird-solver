@@ -170,6 +170,9 @@ public:
     State() :
         win_(0),
         fruit_((1 << FruitCount) - 1) {
+        for (int i = 0; i < GadgetCount; ++i) {
+            gadget_offset_[i] = 0;
+        }
     }
 
     State(const Map& map) : State() {
@@ -329,11 +332,12 @@ public:
                        int* pushed_ids) {
         int to = push_at + delta;
 
-        if (!snake_map[to] || snake_map[to] == pusher_id) {
+        if (!snake_map[to] || snake_map[to] == pusher_id ||
+            snake_map[to] == 'Q') {
             return false;
         }
 
-        int index = snake_id_to_index(snake_map[to]);
+        int index = map_id_to_index(snake_map[to]);
         *pushed_ids = 1 << index;
 
         bool again = true;
@@ -373,7 +377,7 @@ public:
             }
         }
 
-        if (*pushed_ids & snake_id_to_index(pusher_id)) {
+        if (*pushed_ids & map_id_to_index(pusher_id)) {
             return false;
         }
 
@@ -392,8 +396,11 @@ public:
             if (map[to] != ' ') {
                 return false;
             }
+            if (snake_map[to] == 'Q') {
+                return false;
+            }
             if (snake_map[to] && snake_map[to] != snake.id_) {
-                *pushed_ids |= 1 << snake_id_to_index(snake_map[to]);
+                *pushed_ids |= 1 << map_id_to_index(snake_map[to]);
             }
             to -= Snake::apply_direction(snake.tail(j));
         }
@@ -414,8 +421,11 @@ public:
             if (map[i] != ' ') {
                 return false;
             }
+            if (snake_map[i] == 'Q') {
+                return false;
+            }
             if (snake_map[i]) {
-                *pushed_ids |= 1 << snake_id_to_index(snake_map[i]);
+                *pushed_ids |= 1 << map_id_to_index(snake_map[i]);
             }
         }
 
@@ -424,7 +434,7 @@ public:
         return true;
     }
 
-    int snake_id_to_index(int id) {
+    int map_id_to_index(int id) {
         for (int i = 0; i < SnakeCount; ++i) {
             if (id == snakes_[i].id_) {
                 return i;
@@ -657,7 +667,7 @@ public:
     }
 
     Snake snakes_[SnakeCount];
-    int16_t gadget_offset_[GadgetCount] = { 0 };
+    int16_t gadget_offset_[GadgetCount];
     uint16_t win_;
     uint16_t fruit_;
 };
@@ -770,13 +780,35 @@ bool search(St start_state, const Map& map) {
 // #include "level16.h"
 // #include "level17.h"
 // #include "level18.h"
-// #include "level19.h"
+#include "level19.h"
 // #include "level20.h"
 // #include "level21.h"
-#include "level22.h"
+// #include "level22.h"
 
 int main() {
-    level_22();
+    // assert(level_00());
+    // assert(level_01());
+    // assert(level_02());
+    // assert(level_03());
+    // assert(level_04());
+    // assert(level_05());
+    // assert(level_06());
+    // assert(level_07());
+    // assert(level_08());
+    // assert(level_09());
+    // assert(level_10());
+    // assert(level_11());
+    // assert(level_12());
+    // assert(level_13());
+    // assert(level_14());
+    // assert(level_15());
+    // assert(level_16());
+    // assert(level_17());
+    // assert(level_18());
+    assert(level_19());
+    // assert(level_20());
+    // assert(level_21());
+    // assert(level_22());
 
     return 0;
 }
