@@ -16,6 +16,9 @@ public:
         UP, RIGHT, DOWN, LEFT,
     };
 
+    static const int kDirWidth = 2;
+    static const int kDirMask = (1 << kDirWidth) - 1;
+
     Snake() : tail_(0), i_(0), len_(0), id_(0) {
     }
 
@@ -30,17 +33,17 @@ public:
     void grow(Direction dir) {
         i_ += apply_direction(dir);
         ++len_;
-        tail_ = (tail_ << 2) | dir;
+        tail_ = (tail_ << kDirWidth) | dir;
     }
 
     void move(Direction dir) {
         i_ += apply_direction(dir);
-        tail_ &= ~(0x3 << (len_ - 1) * 2);
-        tail_ = (tail_ << 2) | dir;
+        tail_ &= ~(kDirMask << ((len_ - 2) * kDirWidth));
+        tail_ = (tail_ << kDirWidth) | dir;
     }
 
     Direction tail(int i) const {
-        return Direction((tail_ >> (i * 2)) & 0x3);
+        return Direction((tail_ >> (i * kDirWidth)) & kDirMask);
     }
 
     static int apply_direction(Direction dir) {
