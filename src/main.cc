@@ -405,9 +405,10 @@ const char* map =
 #include "level02.h"
 #include "level03.h"
 #include "level19.h"
+#include "level21.h"
 
 int main() {
-    level_19();
+    level_21();
 
     return 0;
 }
