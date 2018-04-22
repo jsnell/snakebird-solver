@@ -58,14 +58,16 @@ public:
     State(const char* map)
         : map_(strdup(map)) {
         assert(strlen(map) == H * W);
-        snake_map_ = new char[H * W];
     }
 
     void print() {
+        char snake_map[H * W];
+        draw_snakes(snake_map);
+
         for (int i = 0; i < H; ++i) {
             for (int j = 0; j < W; ++j) {
                 printf("%c",
-                       snake_map_[i * W + j] ^ map_[i * W + j]);
+                       snake_map[i * W + j] ^ map_[i * W + j]);
             }
             printf("\n");
         }
@@ -74,7 +76,6 @@ public:
 
     int add_snake(const Snake& snake, int i) {
         snakes_[i] = snake;
-        draw_snakes();
         return i++;
     }
 
@@ -82,10 +83,11 @@ public:
         static Direction dirs[] = {
             Snake::UP, Snake::RIGHT, Snake::DOWN, Snake::LEFT,
         };
-        draw_snakes();
+        char snake_map[H * W];
+        draw_snakes(snake_map);
         for (int s = 0; s < SnakeCount; ++s) {
             for (auto dir : dirs) {
-                if (is_valid_move(snakes_[s], dir)) {
+                if (is_valid_move(snake_map, snakes_[s], dir)) {
                     State new_state(*this);
                     new_state.snakes_[s].move(dir);
                     new_state.process_gravity();
@@ -98,10 +100,11 @@ public:
         printf("No valid moves\n");
     }
 
-    bool is_valid_move(const Snake& snake, Direction dir) {
+    bool is_valid_move(const char* snake_map,
+                       const Snake& snake, Direction dir) {
         int i = snake.i_ + Snake::apply_direction(dir);
 
-        if ((snake_map_[i] ^ map_[i]) == ' ') {
+        if ((snake_map[i] ^ map_[i]) == ' ') {
             return true;
         }
 
@@ -112,9 +115,10 @@ public:
         bool again;
         do {
             again = false;
-            draw_snakes();
+            char snake_map[H * W];
+            draw_snakes(snake_map);
             for (auto snake : snakes_) {
-                if (!snake_is_supported(snake)) {
+                if (!snake_is_supported(snake_map, snake)) {
                     snake.i_ += W;
                     again = true;
                 }
@@ -141,13 +145,13 @@ public:
     //   a) the base map, b) other snakes (and which ones?).
     // - Then for each snake try to trace through the support
     //   graph all the way to the ground.
-    bool snake_is_supported(const Snake& snake) {
+    bool snake_is_supported(const char* snake_map, const Snake& snake) {
         // The space below the snake's head.
         int below = snake.i_ + W;
 
         for (int j = 0; j < snake.len_; ++j) {
-            if ((snake_map_[below] != '\0' &&
-                 snake_map_[below] != snake.id_) ||
+            if ((snake_map[below] != '\0' &&
+                 snake_map[below] != snake.id_) ||
                 (map_[below] != ' ')) {
                 return true;
             }
@@ -158,24 +162,23 @@ public:
         return false;
     }
 
-    void draw_snakes() {
-        memset(snake_map_, 0, H * W);
+    void draw_snakes(char* snake_map) {
+        memset(snake_map, 0, H * W);
         for (auto snake : snakes_) {
-            draw_snake(snake);
+            draw_snake(snake_map, snake);
         }
     }
 
-    void draw_snake(const Snake& snake) {
+    void draw_snake(char* snake_map, const Snake& snake) {
         int i = snake.i_;
         for (int j = 0; j < snake.len_; ++j) {
-            snake_map_[i] = snake.id_;
+            snake_map[i] = snake.id_;
             i -= Snake::apply_direction(snake.tail(j));
         }
     }
 
     Snake snakes_[SnakeCount];
     char* map_;
-    char* snake_map_;
 };
 
 const char* map =
@@ -201,7 +204,7 @@ int main() {
 
     for (int i = 0; i < 10; ++i) {
         state.do_valid_moves([&state](St new_state) {
-                state.print();
+                new_state.print();
                 return false;
             });
         state.print();
