@@ -394,12 +394,16 @@ bool search(St start_state, const char* map) {
            win ? "Win" : "No solution",
            steps);
 
+    int moves = 0;
     if (win) {
         while (!eq<St>()(win_state, null_state)) {
             win_state.print(map);
             win_state = seen_states[win_state];
+            ++moves;
         }
     }
+
+    printf("Used %d moves\n", moves);
 
     return win;
 }
@@ -421,11 +425,12 @@ const char* map =
 #include "level04.h"
 #include "level05.h"
 #include "level06.h"
+#include "level07.h"
 #include "level19.h"
 #include "level21.h"
 
 int main() {
-    level_06();
+    level_07();
 
     return 0;
 }
