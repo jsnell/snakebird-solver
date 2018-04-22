@@ -6,45 +6,54 @@
 #include <functional>
 #include <vector>
 
-enum Direction {
-    UP, RIGHT, DOWN, LEFT,
-    MAX_DIR
-};
-
-template<int H, int W>
+template<int H, int W, int MaxLen>
 class Snake {
 public:
+    enum Direction {
+        UP, RIGHT, DOWN, LEFT,
+    };
+
+    Snake() : id_(0), i_(0), len_(0), tail_(0) {
+    }
+
     Snake(int id, int r, int c)
         : id_(id),
-          i_(r * W + c) {
+          i_(r * W + c),
+          len_(1),
+          tail_(0) {
         assert(i_ < H * W);
     }
 
     void grow(Direction dir) {
-        tail_.push_front(dir);
+        ++len_;
+        tail_ = (tail_ << 2) | dir;
     }
 
     void move(Direction dir) {
-        switch (dir) {
-        case UP: i_ -= W; break;
-        case RIGHT: ++i_; break;
-        case DOWN: i_ += W; break;
-        case LEFT: --i_; break;
-        default: assert(false);
-        }
-        tail_.push_front(dir);
-        tail_.pop_back();
+        i_ += apply_direction(dir);
+        tail_ = (tail_ << 2) | dir;
+    }
+
+    Direction tail(int i) const {
+        return Direction((tail_ >> (i * 2)) & 0x3);
+    }
+
+    static int apply_direction(Direction dir) {
+        static int deltas[] = { -W, 1, W, -1 };
+        return deltas[dir];
     }
 
     int id_;
     int i_;
-    std::deque<Direction> tail_;
+    int len_;
+    int tail_;
 };
 
-template<int H, int W>
+template<int H, int W, int SnakeCount, int SnakeMaxLen>
 class State {
 public:
-    using Snake = ::Snake<H, W>;
+    using Snake = typename ::Snake<H, W, SnakeMaxLen>;
+    using Direction = typename Snake::Direction;
 
     State(const char* map)
         : map_(strdup(map)) {
@@ -63,19 +72,24 @@ public:
         printf("\n");
     }
 
-    void add_snake(Snake* snake) {
-        snakes_.push_back(snake);
+    int add_snake(const Snake& snake, int i) {
+        snakes_[i] = snake;
         draw_snakes();
+        return i++;
     }
 
-    void do_valid_moves(std::function<bool(Snake*, Direction dir)> fun) {
+    void do_valid_moves(std::function<bool(State)> fun) {
+        static Direction dirs[] = {
+            Snake::UP, Snake::RIGHT, Snake::DOWN, Snake::LEFT,
+        };
         draw_snakes();
-        for (auto snake : snakes_) {
-            for (int i = 0; i < MAX_DIR; ++i) {
-                Direction dir((Direction) i);
-                if (is_valid_move(snake, dir)) {
-                    if (fun(snake, dir)) {
-                        process_gravity();
+        for (int s = 0; s < SnakeCount; ++s) {
+            for (auto dir : dirs) {
+                if (is_valid_move(snakes_[s], dir)) {
+                    State new_state(*this);
+                    new_state.snakes_[s].move(dir);
+                    new_state.process_gravity();
+                    if (fun(new_state)) {
                         return;
                     }
                 }
@@ -84,16 +98,8 @@ public:
         printf("No valid moves\n");
     }
 
-    bool is_valid_move(Snake* snake, Direction dir) {
-        int i = snake->i_;
-
-        switch (dir) {
-        case UP: i -= W; break;
-        case RIGHT: ++i; break;
-        case DOWN: i += W; break;
-        case LEFT: --i; break;
-        default: assert(false);
-        }
+    bool is_valid_move(const Snake& snake, Direction dir) {
+        int i = snake.i_ + Snake::apply_direction(dir);
 
         if ((snake_map_[i] ^ map_[i]) == ' ') {
             return true;
@@ -109,7 +115,7 @@ public:
             draw_snakes();
             for (auto snake : snakes_) {
                 if (!snake_is_supported(snake)) {
-                    snake->i_ += W;
+                    snake.i_ += W;
                     again = true;
                 }
             }
@@ -135,30 +141,18 @@ public:
     //   a) the base map, b) other snakes (and which ones?).
     // - Then for each snake try to trace through the support
     //   graph all the way to the ground.
-    bool snake_is_supported(Snake* snake) {
+    bool snake_is_supported(const Snake& snake) {
         // The space below the snake's head.
-        int below = snake->i_ + W;
+        int below = snake.i_ + W;
 
-        if ((snake_map_[below] != '\0' &&
-             snake_map_[below] != snake->id_) ||
-            (map_[below] != ' ')) {
-            return true;
-        }
-
-        for (auto dir : snake->tail_) {
-            switch (dir) {
-            case DOWN: below -= W; break;
-            case LEFT: ++below; break;
-            case UP: below += W; break;
-            case RIGHT: --below; break;
-            default: assert(false);
-            }
-
+        for (int j = 0; j < snake.len_; ++j) {
             if ((snake_map_[below] != '\0' &&
-                 snake_map_[below] != snake->id_) ||
+                 snake_map_[below] != snake.id_) ||
                 (map_[below] != ' ')) {
                 return true;
             }
+
+            below -= Snake::apply_direction(snake.tail(j));
         }
 
         return false;
@@ -171,23 +165,15 @@ public:
         }
     }
 
-    void draw_snake(Snake* snake) {
-        int i = snake->i_;
-        snake_map_[i] = snake->id_;
-
-        for (auto dir : snake->tail_) {
-            switch (dir) {
-            case DOWN: i -= W; break;
-            case LEFT: ++i; break;
-            case UP: i += W; break;
-            case RIGHT: --i; break;
-            default: assert(false);
-            }
-            snake_map_[i] = snake->id_;
+    void draw_snake(const Snake& snake) {
+        int i = snake.i_;
+        for (int j = 0; j < snake.len_; ++j) {
+            snake_map_[i] = snake.id_;
+            i -= Snake::apply_direction(snake.tail(j));
         }
     }
 
-    std::vector<Snake*> snakes_;
+    Snake snakes_[SnakeCount];
     char* map_;
     char* snake_map_;
 };
@@ -202,19 +188,21 @@ const char* map =
     ".......";
 
 int main() {
-    State<7, 7> state(map);
+    using St = State<7, 7, 1, 4>;
+    St state(map);
+    // printf("%ld\n", sizeof(St));
 
-    Snake<7, 7> a('a', 2, 3);
-    a.grow(RIGHT);
-    a.grow(DOWN);
-    state.add_snake(&a);
+    St::Snake a('a', 2, 3);
+    a.grow(St::Snake::RIGHT);
+    a.grow(St::Snake::DOWN);
+    state.add_snake(a, 0);
 
     state.print();
 
-    for (int i = 0; i < 100; ++i) {
-        state.do_valid_moves([](Snake<7, 7>* snake, Direction dir) {
-                snake->move(dir);
-                return true;
+    for (int i = 0; i < 10; ++i) {
+        state.do_valid_moves([&state](St new_state) {
+                state.print();
+                return false;
             });
         state.print();
     }
