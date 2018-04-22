@@ -60,15 +60,20 @@ public:
     using Snake = typename ::Snake<H, W, SnakeMaxLen>;
     using Direction = typename Snake::Direction;
 
-    State() : map_(NULL) {
+    State() : State(NULL) {
     }
 
     State(const char* map)
-        : map_(strdup(map)) {
-        assert(strlen(map) == H * W);
+        : exit_(0) {
+        if (map) {
+            assert(strlen(map) == H * W);
+        }
+        for (auto& fruit : fruit_) {
+            fruit = 0;
+        }
     }
 
-    void print() {
+    void print(const char* map) {
         char snake_map[H * W];
         draw_snakes(snake_map);
 
@@ -90,7 +95,7 @@ public:
                 } else if (snake_map[l]) {
                     printf("%c", snake_map[l]);
                 } else {
-                    printf("%c", map_[l]);
+                    printf("%c", map[l]);
                 }
             }
             printf("\n");
@@ -122,7 +127,8 @@ public:
         }
     }
 
-    void do_valid_moves(std::function<bool(State)> fun) {
+    void do_valid_moves(const char* map,
+                        std::function<bool(State)> fun) {
         static Direction dirs[] = {
             Snake::UP, Snake::RIGHT, Snake::DOWN, Snake::LEFT,
         };
@@ -138,15 +144,15 @@ public:
                     State new_state(*this);
                     new_state.snakes_[s].grow(dir);
                     new_state.delete_fruit(to);
-                    if (new_state.process_gravity()) {
+                    if (new_state.process_gravity(map)) {
                         if (fun(new_state)) {
                             return;
                         }
                     }
-                } else if (is_valid_move(snake_map, snakes_[s], to)) {
+                } else if (is_valid_move(map, snake_map, snakes_[s], to)) {
                     State new_state(*this);
                     new_state.snakes_[s].move(dir);
-                    if (new_state.process_gravity()) {
+                    if (new_state.process_gravity(map)) {
                         if (fun(new_state)) {
                             return;
                         }
@@ -166,17 +172,18 @@ public:
         return false;
     }
 
-    bool is_valid_move(const char* snake_map,
+    bool is_valid_move(const char* map,
+                       const char* snake_map,
                        const Snake& snake, int to) {
         if (!snake_map[to] &&
-            map_[to] == ' ') {
+            map[to] == ' ') {
             return true;
         }
 
         return false;
     }
 
-    bool process_gravity() {
+    bool process_gravity(const char* map) {
         bool again;
         do {
             again = false;
@@ -186,7 +193,8 @@ public:
             for (auto& snake : snakes_) {
                 if (snake.len_) {
                     bool falling, falling_to_death;
-                    is_snake_falling(snake_map,
+                    is_snake_falling(map,
+                                     snake_map,
                                      snake,
                                      &falling, &falling_to_death);
                     if (falling) {
@@ -239,7 +247,9 @@ public:
     //   a) the base map, b) other snakes (and which ones?).
     // - Then for each snake try to trace through the support
     //   graph all the way to the ground.
-    void is_snake_falling(const char* snake_map, const Snake& snake,
+    void is_snake_falling(const char* map,
+                          const char* snake_map,
+                          const Snake& snake,
                           bool* falling,
                           bool* falling_to_death) {
         // The space below the snake's head.
@@ -250,12 +260,12 @@ public:
         for (int j = 0; j < snake.len_; ++j) {
             if ((snake_map[below] &&
                  snake_map[below] != snake.id_) ||
-                (map_[below] == '.')) {
+                (map[below] == '.')) {
                 *falling = false;
                 break;
             }
 
-            if (map_[below] == '~') {
+            if (map[below] == '~') {
                 *falling_to_death = true;
             }
 
@@ -310,7 +320,6 @@ public:
         return true;
     }
 
-    char* map_;
     Snake snakes_[SnakeCount];
     uint16_t fruit_[FruitCount];
     uint16_t exit_;
@@ -332,11 +341,12 @@ struct eq {
 };
 
 template<class St>
-bool search(St start_state) {
+bool search(St start_state, const char* map) {
+    printf("%ld\n", sizeof(St));
     St null_state;
 
     // Just in case the starting state is invalid.
-    start_state.process_gravity();
+    start_state.process_gravity(map);
 
     // BFS state
     std::deque<St> todo;
@@ -358,7 +368,8 @@ bool search(St start_state) {
             fflush(stdout);
         }
 
-        st.do_valid_moves([&st, &todo, &seen_states, &win,
+        st.do_valid_moves(map,
+                          [&st, &todo, &seen_states, &win,
                            &win_state](St new_state) {
                 if (seen_states.find(new_state) != seen_states.end()) {
                     return false;
@@ -382,7 +393,7 @@ bool search(St start_state) {
 
     if (win) {
         while (!eq<St>()(win_state, null_state)) {
-            win_state.print();
+            win_state.print(map);
             win_state = seen_states[win_state];
         }
     }
@@ -404,11 +415,12 @@ const char* map =
 #include "level01.h"
 #include "level02.h"
 #include "level03.h"
+#include "level04.h"
 #include "level19.h"
 #include "level21.h"
 
 int main() {
-    level_21();
+    level_04();
 
     return 0;
 }

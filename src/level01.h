@@ -23,7 +23,7 @@ bool level_01() {
     green.grow(St::Snake::RIGHT);
     st.add_snake(green, 0);
 
-    st.print();
+    st.print(map);
 
-    return search(st);
+    return search(st, map);
 }
