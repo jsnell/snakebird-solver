@@ -71,7 +71,7 @@ public:
 
     class Map {
     public:
-        Map(const char* base_map) : exit_(0) {
+        explicit Map(const char* base_map) : exit_(0) {
             assert(strlen(base_map) == H * W);
             base_map_ = new char[H * W];
             int fruit_count = 0;
@@ -158,7 +158,7 @@ public:
 
     void print(const Map& map) {
         char snake_map[H * W];
-        draw_snakes(map, snake_map);
+        draw_snakes(map, snake_map, true);
 
 #if 0
         for (auto snake : snakes_) {
@@ -212,7 +212,7 @@ public:
             Snake::UP, Snake::RIGHT, Snake::DOWN, Snake::LEFT,
         };
         char snake_map[H * W];
-        draw_snakes(map, snake_map);
+        draw_snakes(map, snake_map, false);
         for (int s = 0; s < SnakeCount; ++s) {
             if (!snakes_[s].len_) {
                 continue;
@@ -342,7 +342,7 @@ public:
             again = false;
             char snake_map[H * W];
             check_exits(map);
-            draw_snakes(map, snake_map);
+            draw_snakes(map, snake_map, false);
             for (auto& snake : snakes_) {
                 if (snake.len_) {
                     bool falling, falling_to_death;
@@ -445,10 +445,11 @@ public:
         return snake.i_ == map.exit_;
     }
 
-    void draw_snakes(const Map& map, char* snake_map) {
+    void draw_snakes(const Map& map, char* snake_map,
+                     bool draw_path) {
         memset(snake_map, 0, H * W);
         for (auto snake : snakes_) {
-            draw_snake(snake_map, snake);
+            draw_snake(snake_map, snake, draw_path);
         }
         for (int i = 0; i < FruitCount; ++i) {
             if (fruit_active(i)) {
@@ -457,10 +458,19 @@ public:
         }
     }
 
-    void draw_snake(char* snake_map, const Snake& snake) {
+    void draw_snake(char* snake_map, const Snake& snake, bool draw_path) {
         int i = snake.i_;
         for (int j = 0; j < snake.len_; ++j) {
-            snake_map[i] = snake.id_;
+            if (j == 0 || !draw_path) {
+                snake_map[i] = snake.id_;
+            } else {
+                switch (snake.tail(j - 1)) {
+                case Snake::UP: snake_map[i] = '^'; break;
+                case Snake::DOWN: snake_map[i] = 'v'; break;
+                case Snake::LEFT: snake_map[i] = '<'; break;
+                case Snake::RIGHT: snake_map[i] = '>'; break;
+                }
+            }
             // ^ (32 * (j == 0)); // Use different case for head
             i -= Snake::apply_direction(snake.tail(j));
         }
