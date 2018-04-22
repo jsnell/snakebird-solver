@@ -296,6 +296,8 @@ public:
             if (snake.len_) {
                 if (snake_intersects_exit(snake)) {
                     snake.len_ = 0;
+                    snake.i_ = 0;
+                    snake.tail_ = 0;
                 }
             }
         }
