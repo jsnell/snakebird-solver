@@ -4,6 +4,8 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <third-party/cityhash/city.h>
+#include <unordered_set>
 #include <vector>
 
 template<int H, int W, int MaxLen>
@@ -97,7 +99,6 @@ public:
                 }
             }
         }
-        printf("No valid moves\n");
     }
 
     bool is_valid_move(const char* snake_map,
@@ -117,7 +118,7 @@ public:
             again = false;
             char snake_map[H * W];
             draw_snakes(snake_map);
-            for (auto snake : snakes_) {
+            for (auto& snake : snakes_) {
                 if (!snake_is_supported(snake_map, snake)) {
                     snake.i_ += W;
                     again = true;
@@ -181,6 +182,20 @@ public:
     char* map_;
 };
 
+template<class T>
+struct hash {
+    uint64_t operator()(const T& key) const {
+        return CityHash64(reinterpret_cast<const char*>(&key), sizeof(key));
+    }
+};
+
+template<class T>
+struct eq {
+    uint64_t operator()(const T& a, const T& b) const {
+        return memcmp(&a, &b, sizeof(a)) == 0;
+    }
+};
+
 const char* map =
     "......."
     ".     ."
@@ -202,13 +217,34 @@ int main() {
 
     state.print();
 
-    for (int i = 0; i < 10; ++i) {
-        state.do_valid_moves([&state](St new_state) {
-                new_state.print();
+    std::deque<St> todo;
+    std::unordered_set<St, hash<St>, eq<St>> seen_states;
+
+    todo.push_back(state);
+    seen_states.insert(state);
+
+    size_t steps = 0;
+
+    while (!todo.empty()) {
+        ++steps;
+        if (!(steps & 0xffff)) {
+            printf(".");
+            fflush(stdout);
+        }
+        auto st = todo.front();
+        todo.pop_front();
+        st.do_valid_moves([&todo, &seen_states](St new_state) {
+                if (seen_states.find(new_state) != seen_states.end()) {
+                    return false;
+                }
+                seen_states.insert(new_state);
+                todo.push_back(new_state);
                 return false;
             });
-        state.print();
     }
+
+    printf("Done: examined %ld states\n", steps);
+
     // a.move(RIGHT);
     // state.print();
     // a.move(RIGHT);

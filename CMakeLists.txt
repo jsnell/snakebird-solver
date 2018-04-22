@@ -4,10 +4,11 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -O3 -g3 -Wall -Werror -Wno-sign-compare -march=native")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -O3 -g3 -Wall -Werror -Wno-sign-compare -march=native -Isrc")
 
 add_executable(snakebird
-  src/main.cc)
+  src/main.cc
+  src/third-party/cityhash/city.cc)
 
 enable_testing()
 # Usual workaround for the broken test build dependency handling in CMake.
