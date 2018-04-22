@@ -16,14 +16,14 @@ public:
         UP, RIGHT, DOWN, LEFT,
     };
 
-    Snake() : id_(0), i_(0), len_(0), tail_(0) {
+    Snake() : tail_(0), i_(0), len_(0), id_(0) {
     }
 
     Snake(int id, int r, int c)
-        : id_(id),
+        : tail_(0),
           i_(r * W + c),
           len_(1),
-          tail_(0) {
+          id_(id) {
         assert(i_ < H * W);
     }
 
@@ -35,7 +35,7 @@ public:
 
     void move(Direction dir) {
         i_ += apply_direction(dir);
-        tail_ &= ~(0x3 << len_);
+        tail_ &= ~(0x3 << (len_) * 2);
         tail_ = (tail_ << 2) | dir;
     }
 
@@ -48,10 +48,10 @@ public:
         return deltas[dir];
     }
 
-    int id_;
-    int i_;
-    int len_;
     int tail_;
+    uint16_t i_;
+    uint8_t len_;
+    uint8_t id_;
 };
 
 template<int H, int W, int FruitCount, int SnakeCount, int SnakeMaxLen>
