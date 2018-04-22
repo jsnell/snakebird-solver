@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 #include <cstdlib>
 #include <cstdio>
@@ -79,13 +80,23 @@ public:
     }
 
     int add_snake(const Snake& snake, int i) {
+        assert(i < SnakeCount);
         snakes_[i] = snake;
         return i + 1;
     }
 
     int add_fruit(int r, int c, int i) {
+        assert(i < FruitCount);
         fruit_[i] = r * W + c;
         return i + 1;
+    }
+
+    void delete_fruit(int i) {
+        for (auto& fruit: fruit_) {
+            if (fruit == i) {
+                fruit = 0;
+            }
+        }
     }
 
     void do_valid_moves(std::function<bool(State)> fun) {
@@ -96,16 +107,16 @@ public:
         draw_snakes(snake_map);
         for (int s = 0; s < SnakeCount; ++s) {
             for (auto dir : dirs) {
-                if (is_valid_grow(snakes_[s], dir)) {
+                int to = snakes_[s].i_ + Snake::apply_direction(dir);
+                if (is_valid_grow(snakes_[s], to)) {
                     State new_state(*this);
                     new_state.snakes_[s].grow(dir);
-                    // FIXME
-                    new_state.fruit_[0] = 0;
+                    new_state.delete_fruit(to);
                     new_state.process_gravity();
                     if (fun(new_state)) {
                         return;
                     }
-                } else if (is_valid_move(snake_map, snakes_[s], dir)) {
+                } else if (is_valid_move(snake_map, snakes_[s], to)) {
                     State new_state(*this);
                     new_state.snakes_[s].move(dir);
                     new_state.process_gravity();
@@ -117,12 +128,9 @@ public:
         }
     }
 
-    bool is_valid_grow(const Snake& snake,
-                       Direction dir) {
-        int i = snake.i_ + Snake::apply_direction(dir);
-
+    bool is_valid_grow(const Snake& snake, int to) {
         for (auto fruit : fruit_) {
-            if (fruit == i) {
+            if (fruit == to) {
                 return true;
             }
         }
@@ -131,10 +139,9 @@ public:
     }
 
     bool is_valid_move(const char* snake_map,
-                       const Snake& snake, Direction dir) {
-        int i = snake.i_ + Snake::apply_direction(dir);
-
-        if ((snake_map[i] ^ map_[i]) == ' ') {
+                       const Snake& snake, int to) {
+        if (!snake_map[to] &&
+            map_[to] == ' ') {
             return true;
         }
 
@@ -213,9 +220,10 @@ public:
         }
     }
 
+    char* map_;
     Snake snakes_[SnakeCount];
     int fruit_[FruitCount];
-    char* map_;
+    // FIXME potential padding, might cause hash / eq issues if nonzero
 };
 
 template<class T>
@@ -236,17 +244,19 @@ const char* map =
     "......."
     ".     ."
     ".     ."
+    ".     ."
     ".  .. ."
     ".     ."
     ".     ."
     ".......";
 
 int main() {
-    using St = State<7, 7, 1, 1, 4>;
+    using St = State<8, 7, 2, 1, 4>;
     St state(map);
     // printf("%ld\n", sizeof(St));
 
     state.add_fruit(4, 2, 0);
+    state.add_fruit(1, 5, 1);
 
     St::Snake a('a', 1, 2);
     a.grow(St::Snake::RIGHT);
