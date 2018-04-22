@@ -35,7 +35,7 @@ public:
 
     void move(Direction dir) {
         i_ += apply_direction(dir);
-        tail_ &= ~(0x3 << (len_) * 2);
+        tail_ &= ~(0x3 << (len_ - 1) * 2);
         tail_ = (tail_ << 2) | dir;
     }
 
