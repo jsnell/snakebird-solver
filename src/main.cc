@@ -543,6 +543,10 @@ bool search(St start_state, const Map& map) {
             fflush(stdout);
         }
 
+        // printf("%lx [%lx]\n", hash<St>()(st),
+        //        hash<St>()(seen_states[st]));
+        // st.print(map);
+
         st.do_valid_moves(map,
                           [&st, &todo, &seen_states, &win, &map,
                            &win_state](St new_state) {
