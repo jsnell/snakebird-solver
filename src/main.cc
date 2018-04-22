@@ -138,16 +138,18 @@ public:
                     State new_state(*this);
                     new_state.snakes_[s].grow(dir);
                     new_state.delete_fruit(to);
-                    new_state.process_gravity();
-                    if (fun(new_state)) {
-                        return;
+                    if (new_state.process_gravity()) {
+                        if (fun(new_state)) {
+                            return;
+                        }
                     }
                 } else if (is_valid_move(snake_map, snakes_[s], to)) {
                     State new_state(*this);
                     new_state.snakes_[s].move(dir);
-                    new_state.process_gravity();
-                    if (fun(new_state)) {
-                        return;
+                    if (new_state.process_gravity()) {
+                        if (fun(new_state)) {
+                            return;
+                        }
                     }
                 }
             }
@@ -174,7 +176,7 @@ public:
         return false;
     }
 
-    void process_gravity() {
+    bool process_gravity() {
         bool again;
         do {
             again = false;
@@ -182,13 +184,24 @@ public:
             check_exits();
             draw_snakes(snake_map);
             for (auto& snake : snakes_) {
-                if (snake.len_ &&
-                    !snake_is_supported(snake_map, snake)) {
-                    snake.i_ += W;
-                    again = true;
+                if (snake.len_) {
+                    bool falling, falling_to_death;
+                    is_snake_falling(snake_map,
+                                     snake,
+                                     &falling, &falling_to_death);
+                    if (falling) {
+                        if (falling_to_death) {
+                            return false;
+                        } else {
+                            snake.i_ += W;
+                            again = true;
+                        }
+                    }
                 }
             }
         } while (again);
+
+        return true;
     }
 
     void check_exits() {
@@ -226,21 +239,30 @@ public:
     //   a) the base map, b) other snakes (and which ones?).
     // - Then for each snake try to trace through the support
     //   graph all the way to the ground.
-    bool snake_is_supported(const char* snake_map, const Snake& snake) {
+    void is_snake_falling(const char* snake_map, const Snake& snake,
+                          bool* falling,
+                          bool* falling_to_death) {
         // The space below the snake's head.
         int below = snake.i_ + W;
+        *falling = true;
+        *falling_to_death = false;
 
         for (int j = 0; j < snake.len_; ++j) {
-            if ((snake_map[below] != '\0' &&
+            if ((snake_map[below] &&
                  snake_map[below] != snake.id_) ||
-                (map_[below] != ' ')) {
-                return true;
+                (map_[below] == '.')) {
+                *falling = false;
+                break;
+            }
+
+            if (map_[below] == '~') {
+                *falling_to_death = true;
             }
 
             below -= Snake::apply_direction(snake.tail(j));
         }
 
-        return false;
+        return;
     }
 
     bool snake_intersects_exit(const Snake& snake) {
@@ -379,6 +401,7 @@ const char* map =
     ".......";
 
 #include "level00.h"
+#include "level01.h"
 
 int main() {
 #if 0
@@ -396,7 +419,7 @@ int main() {
     st.add_snake(a, 0);
     search(st);
 #else
-    level_00();
+    level_01();
 #endif
     return 0;
 }
