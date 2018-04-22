@@ -33,6 +33,7 @@ public:
 
     void move(Direction dir) {
         i_ += apply_direction(dir);
+        tail_ &= ~(0x3 << len_);
         tail_ = (tail_ << 2) | dir;
     }
 
@@ -173,7 +174,7 @@ public:
     void draw_snake(char* snake_map, const Snake& snake) {
         int i = snake.i_;
         for (int j = 0; j < snake.len_; ++j) {
-            snake_map[i] = snake.id_;
+            snake_map[i] = snake.id_ ^ (32 * (j == 0));
             i -= Snake::apply_direction(snake.tail(j));
         }
     }
@@ -226,13 +227,16 @@ int main() {
     size_t steps = 0;
 
     while (!todo.empty()) {
+        auto st = todo.front();
+        todo.pop_front();
+
         ++steps;
         if (!(steps & 0xffff)) {
             printf(".");
             fflush(stdout);
+            // st.print();
         }
-        auto st = todo.front();
-        todo.pop_front();
+
         st.do_valid_moves([&todo, &seen_states](St new_state) {
                 if (seen_states.find(new_state) != seen_states.end()) {
                     return false;
