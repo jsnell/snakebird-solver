@@ -402,6 +402,7 @@ const char* map =
 
 #include "level00.h"
 #include "level01.h"
+#include "level02.h"
 
 int main() {
 #if 0
@@ -419,7 +420,7 @@ int main() {
     st.add_snake(a, 0);
     search(st);
 #else
-    level_01();
+    level_02();
 #endif
     return 0;
 }
