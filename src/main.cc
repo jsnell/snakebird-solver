@@ -171,8 +171,8 @@ public:
     State() :
         win_(0),
         fruit_((1 << FruitCount) - 1) {
-        for (int i = 0; i < GadgetCount; ++i) {
-            gadget_offset_[i] = 0;
+        for (auto& offset : gadget_offset_) {
+            offset = 0;
         }
     }
 
@@ -730,7 +730,7 @@ public:
     }
 
     Snake snakes_[SnakeCount];
-    int16_t gadget_offset_[GadgetCount];
+    int16_t gadget_offset_[GadgetCount + GadgetCount % 2];
     uint16_t win_;
     uint16_t fruit_;
 };
