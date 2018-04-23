@@ -912,12 +912,12 @@ int main() {
     EXPECT_EQ(44, level_13());
     EXPECT_EQ(24, level_14());
     EXPECT_EQ(34, level_15());
-    EXPECT_EQ(65, level_16()); // 65
+    EXPECT_EQ(65, level_16());
     EXPECT_EQ(68, level_17());
     EXPECT_EQ(35, level_18());
     EXPECT_EQ(47, level_19());
     EXPECT_EQ(50, level_20());
-    EXPECT_EQ(29, level_21()); // 39
+    EXPECT_EQ(39, level_21());
     EXPECT_EQ(45, level_22());
     EXPECT_EQ(53, level_23());
     EXPECT_EQ(26, level_24());
