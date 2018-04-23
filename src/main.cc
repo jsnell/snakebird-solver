@@ -621,6 +621,10 @@ public:
                 *falling = false;
                 return;
             }
+            if (map[below] == '#') {
+                *falling = false;
+                return;
+            }
             if (snake_map[below] &&
                 snake_map[below] != id) {
                 int new_pushed_ids = 0;
@@ -649,7 +653,7 @@ public:
     bool snake_intersects_water(const Map& map, const Snake& snake) {
         int i = snake.i_;
         for (int j = 0; j < snake.len_; ++j) {
-            if (map[i] == '~')
+            if (map[i] == '~' || map[i] == '#')
                 return true;
             i -= Snake::apply_direction(snake.tail(j));
         }
