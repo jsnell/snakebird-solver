@@ -15,7 +15,7 @@ int level_28() {
         ".  ..... ."
         "~~~~~~~~~~";
 
-    using St = State<14, 10, 1, 2, 0, 1>;
+    using St = State<14, 10, 1, 2, 4, 1>;
     St::Map map(base_map);
     St st(map);
     st.print(map);

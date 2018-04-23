@@ -12,7 +12,7 @@ int level_01() {
         ".  ...   ."
         "~~~~~~~~~~";
 
-    using St = State<11, 10, 2, 1, 0, 0>;
+    using St = State<11, 10, 2, 1, 4, 0>;
     St::Map map(base_map);
     St st(map);
     st.print(map);

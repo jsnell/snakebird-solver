@@ -95,6 +95,7 @@ public:
             base_map_ = new char[H * W];
             int fruit_count = 0;
             int snake_count = 0;
+            int max_len = 0;
             for (int i = 0; i < H * W; ++i) {
                 if (base_map[i] == 'O') {
                     if (FruitCount) {
@@ -114,6 +115,7 @@ public:
                     snake.tail_ = trace_tail(base_map, i, &len);
                     snake.len_ += len;
                     snakes_[snake_count++] = snake;
+                    max_len = std::max(max_len, (int) snake.len_);
                 } else if (isdigit(base_map[i])) {
                     base_map_[i] = ' ';
                     gadgets_[base_map[i] - '0'].add(i);
@@ -127,6 +129,11 @@ public:
                 }
             }
 
+            if (SnakeMaxLen < max_len + FruitCount) {
+                fprintf(stderr, "Expected SnakeMaxLen >= %d, got %d\n",
+                        max_len + FruitCount,
+                        SnakeMaxLen);
+            }
             assert(fruit_count == FruitCount);
             assert(snake_count == SnakeCount);
             assert(exit_);
@@ -903,7 +910,7 @@ int main() {
     EXPECT_EQ(30, level_04());
     EXPECT_EQ(24, level_05());
     EXPECT_EQ(36, level_06());
-    EXPECT_EQ(44, level_07());
+    EXPECT_EQ(43, level_07());
     EXPECT_EQ(29, level_08());
     EXPECT_EQ(37, level_09());
     EXPECT_EQ(33, level_10());

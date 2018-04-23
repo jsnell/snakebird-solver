@@ -19,7 +19,7 @@ int level_45() {
         ".    #.#     ."
         "~~~~~~~~~~~~~~";
 
-    using St = State<18, 14, 2, 2, 0, 2>;
+    using St = State<18, 14, 2, 2, 6, 2>;
     St::Map map(base_map);
     St st(map);
     st.print(map);

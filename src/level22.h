@@ -14,7 +14,7 @@ int level_22() {
         ".   ....... ."
         "~~~~~~~~~~~~~";
 
-    using St = State<13, 13, 0, 1, 0, 1>;
+    using St = State<13, 13, 0, 1, 3, 1>;
     St::Map map(base_map);
     St st(map);
     st.process_gravity(map);
