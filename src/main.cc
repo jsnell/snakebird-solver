@@ -762,7 +762,7 @@ struct eq {
 };
 
 template<class St, class Map>
-bool search(St start_state, const Map& map) {
+int search(St start_state, const Map& map) {
     printf("%ld\n", sizeof(St));
     St null_state;
 
@@ -822,7 +822,7 @@ bool search(St start_state, const Map& map) {
 
     int moves = 0;
     if (win) {
-        while (!(win_state == null_state)) {
+        while (!(win_state == start_state)) {
             win_state.print(map);
             win_state = seen_states[win_state];
             ++moves;
@@ -831,131 +831,139 @@ bool search(St start_state, const Map& map) {
 
     printf("%ld states, %d moves\n", steps, moves);
 
-    return win;
+    return moves;
 }
 
-// #include "level00.h"
-// #include "level01.h"
-// #include "level02.h"
-// #include "level03.h"
-// #include "level04.h"
-// #include "level05.h"
-// #include "level06.h"
-// #include "level07.h"
-// #include "level08.h"
-// #include "level09.h"
-// #include "level10.h"
-// #include "level11.h"
-// #include "level12.h"
-// #include "level13.h"
-// #include "level14.h"
-// #include "level15.h"
-// #include "level16.h"
-// #include "level17.h"
-// #include "level18.h"
-// #include "level19.h"
-// #include "level20.h"
-// #include "level21.h"
-// #include "level22.h"
-// #include "level23.h"
-// #include "level24.h"
-// #include "level25.h"
-// #include "level26.h"
-// #include "level27.h"
-// #include "level28.h"
-// #include "level29.h"
-// #include "level30.h"
-// #include "level31.h"
-// #include "level32.h"
-// #include "level33.h"
-// #include "level34.h"
-// #include "level35.h"
-// #include "level36.h"
-// #include "level37.h"
-// #include "level38.h"
-// #include "level39.h"
-// #include "level40.h"
-// #include "level41.h"
-// #include "level42.h"
-// #include "level43.h"
-// #include "level44.h"
-// #include "level45.h"
-// #include "levelstar1.h"
+#include "level00.h"
+#include "level01.h"
+#include "level02.h"
+#include "level03.h"
+#include "level04.h"
+#include "level05.h"
+#include "level06.h"
+#include "level07.h"
+#include "level08.h"
+#include "level09.h"
+#include "level10.h"
+#include "level11.h"
+#include "level12.h"
+#include "level13.h"
+#include "level14.h"
+#include "level15.h"
+#include "level16.h"
+#include "level17.h"
+#include "level18.h"
+#include "level19.h"
+#include "level20.h"
+#include "level21.h"
+#include "level22.h"
+#include "level23.h"
+#include "level24.h"
+#include "level25.h"
+#include "level26.h"
+#include "level27.h"
+#include "level28.h"
+#include "level29.h"
+#include "level30.h"
+#include "level31.h"
+#include "level32.h"
+#include "level33.h"
+#include "level34.h"
+#include "level35.h"
+#include "level36.h"
+#include "level37.h"
+#include "level38.h"
+#include "level39.h"
+#include "level40.h"
+#include "level41.h"
+#include "level42.h"
+#include "level43.h"
+#include "level44.h"
+#include "level45.h"
+#include "levelstar1.h"
 // #include "levelstar2.h"
-// #include "levelstar3.h"
-// #include "levelstar4.h"
-// #include "levelstar5.h"
-// #include "levelstar6.h"
+#include "levelstar3.h"
+#include "levelstar4.h"
+#include "levelstar5.h"
+#include "levelstar6.h"
 
 int main() {
-    // assert(level_00());
-    // assert(level_01());
-    // assert(level_02());
-    // assert(level_03());
-    // assert(level_04());
-    // assert(level_05());
-    // assert(level_06());
-    // assert(level_07());
-    // assert(level_08());
-    // assert(level_09());
-    // assert(level_10());
-    // assert(level_11());
-    // assert(level_12());
-    // assert(level_13());
-    // assert(level_14());
-    // assert(level_15());
-    // assert(level_16());
-    // assert(level_17());
-    // assert(level_18());
-    // assert(level_19());
-    // assert(level_20());
-    // assert(level_21());
-    // assert(level_22());
-    // assert(level_23());
-    // assert(level_24());
-    // assert(level_25());
-    // assert(level_26());
-    // assert(level_27());
-    // assert(level_28());
+#define EXPECT_EQ(wanted, actual)                                       \
+    do {                                                                \
+        auto tmp = actual;                                              \
+        if (tmp != wanted) {                                            \
+            fprintf(stderr, "Error: expected %s => %d, got %d\n", #actual, wanted, tmp); \
+        } \
+    } while (0);
+
+    EXPECT_EQ(29, level_00());
+    EXPECT_EQ(17, level_01()); // 16
+    EXPECT_EQ(24, level_02()); // 25
+    EXPECT_EQ(27, level_03());
+    EXPECT_EQ(30, level_04());
+    EXPECT_EQ(24, level_05());
+    EXPECT_EQ(36, level_06());
+    EXPECT_EQ(44, level_07()); // 43
+    EXPECT_EQ(29, level_08());
+    EXPECT_EQ(37, level_09());
+    EXPECT_EQ(33, level_10());
+    EXPECT_EQ(35, level_11());
+    EXPECT_EQ(52, level_12());
+    EXPECT_EQ(44, level_13());
+    EXPECT_EQ(24, level_14());
+    EXPECT_EQ(34, level_15());
+    EXPECT_EQ(65, level_16()); // 65
+    EXPECT_EQ(68, level_17());
+    EXPECT_EQ(35, level_18());
+    EXPECT_EQ(47, level_19());
+    EXPECT_EQ(50, level_20());
+    EXPECT_EQ(29, level_21()); // 39
+    EXPECT_EQ(45, level_22());
+    EXPECT_EQ(53, level_23());
+    EXPECT_EQ(26, level_24());
+    EXPECT_EQ(35, level_25());
+    EXPECT_EQ(35, level_26());
+    EXPECT_EQ(49, level_27());
+    EXPECT_EQ(49, level_28());
     // OOM
-    // assert(level_29());
+    // EXPECT_EQ(0, level_29());
     // Teleport
-    // assert(level_30());
+    // EXPECT_EQ(15, level_30());
     // Teleport
-    // assert(level_31());
+    // EXPECT_EQ(8, level_31());
     // Teleport
-    // assert(level_32());
+    // EXPECT_EQ(21, level_32());
     // Teleport
-    // assert(level_33());
+    // EXPECT_EQ(42, level_33());
     // Teleport
-    // assert(level_34());
+    // EXPECT_EQ(17, level_34());
     // Teleport
-    // assert(level_35());
+    // EXPECT_EQ(29, level_35());
     // Teleport
-    // assert(level_36());
+    // EXPECT_EQ(29, level_36());
     // Teleport
-    // assert(level_37());
+    // EXPECT_EQ(16, level_37());
     // Teleport
-    // assert(level_38());
-    // assert(level_39());
-    // assert(level_40());
-    // assert(level_41());
-    // assert(level_42());
-    // assert(level_43());
+    // EXPECT_EQ(28, level_38());
+    EXPECT_EQ(53, level_39());
+    EXPECT_EQ(51, level_40());
+    EXPECT_EQ(34, level_41());
+    EXPECT_EQ(42, level_42());
+    EXPECT_EQ(36, level_43());
     // Teleport
-    // assert(level_44());
-    // assert(level_45());
+    // EXPECT_EQ(0, level_44());
+    EXPECT_EQ(77, level_45());
     // OOM
-    // assert(level_star1());
+    // EXPECT_EQ(0, level_star1());
     // Too many fruit... Need to parametrize type of fruit_
-    // assert(level_star2());
+    // EXPECT_EQ(60, level_star2());
     // OOM
-    // assert(level_star3());
-    // assert(level_star4());
+    // EXPECT_EQ(0, level_star3());
+    EXPECT_EQ(44, level_star4());
     // Teleport
-    // assert(level_star5());
+    // EXPECT_EQ(69, level_star5());
     // OOM
-    // assert(level_star6());
+    // EXPECT_EQ(0, level_star6());
 
     return 0;
 }

@@ -1,4 +1,4 @@
-bool level_18() {
+int level_18() {
     const char* base_map =
         ".................."
         ".                ."
