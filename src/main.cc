@@ -491,7 +491,6 @@ public:
                     if (falling_to_death) {
                         return false;
                     } else {
-                        snake.i_ += W;
                         do_pushes(pushed_while_falling, W);
                         if (destroy_if_intersects_water(map,
                                                         pushed_while_falling))
@@ -517,7 +516,7 @@ public:
                     if (falling_to_death) {
                         gadget_offset_[i] = kGadgetDeleted;
                     } else {
-                        gadget_offset_[i] += W;
+                        do_pushes(pushed_while_falling, W);
                         if (destroy_if_intersects_water(map,
                                                         pushed_while_falling))
                             return false;
@@ -570,7 +569,7 @@ public:
         *falling = true;
         *falling_to_death = false;
 
-        int pushed_ids = 0;
+        int pushed_ids = 1 << map_id_to_index(snake.id_);
 
         for (int j = 0; j < snake.len_; ++j) {
             if (map[below] == '.') {
@@ -578,12 +577,16 @@ public:
                 return;
             }
             if (snake_map[below] &&
-                snake_map[below] != snake.id_ &&
-                !is_valid_push(map, snake_map, snake.id_,
-                               below - W, W,
-                               &pushed_ids)) {
-                *falling = false;
-                return;
+                snake_map[below] != snake.id_) {
+                int new_pushed_ids = 0;
+                if (is_valid_push(map, snake_map, snake.id_,
+                                  below - W, W,
+                                  &new_pushed_ids)) {
+                    pushed_ids |= new_pushed_ids;
+                } else {
+                    *falling = false;
+                    return;
+                }
             }
 
             if (map[below] == '~') {
@@ -607,7 +610,7 @@ public:
         *falling = true;
         *falling_to_death = false;
 
-        int pushed_ids = 0;
+        int pushed_ids = 1 << (gadget_index + SnakeCount);
         int id = ('0' + gadget_index);
 
         for (int j = 0; j < gadget.size_; ++j) {
@@ -618,10 +621,14 @@ public:
                 return;
             }
             if (snake_map[below] &&
-                snake_map[below] != id &&
-                !is_valid_push(map, snake_map, id, at, W, &pushed_ids)) {
-                *falling = false;
-                return;
+                snake_map[below] != id) {
+                int new_pushed_ids = 0;
+                if (is_valid_push(map, snake_map, id, at, W, &new_pushed_ids)) {
+                    pushed_ids |= new_pushed_ids;
+                } else {
+                    *falling = false;
+                    return;
+                }
             }
 
             if (map[below] == '~') {
