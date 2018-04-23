@@ -903,7 +903,7 @@ int main() {
     EXPECT_EQ(30, level_04());
     EXPECT_EQ(24, level_05());
     EXPECT_EQ(36, level_06());
-    EXPECT_EQ(44, level_07()); // 43
+    EXPECT_EQ(44, level_07());
     EXPECT_EQ(29, level_08());
     EXPECT_EQ(37, level_09());
     EXPECT_EQ(33, level_10());
