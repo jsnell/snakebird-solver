@@ -897,7 +897,7 @@ int main() {
     } while (0);
 
     EXPECT_EQ(29, level_00());
-    EXPECT_EQ(17, level_01()); // 16
+    EXPECT_EQ(16, level_01());
     EXPECT_EQ(24, level_02()); // 25
     EXPECT_EQ(27, level_03());
     EXPECT_EQ(30, level_04());
