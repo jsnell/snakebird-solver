@@ -851,6 +851,9 @@ bool search(St start_state, const Map& map) {
 #include "level20.h"
 #include "level21.h"
 #include "level22.h"
+#include "level23.h"
+#include "level24.h"
+#include "level25.h"
 
 int main() {
     assert(level_00());
@@ -872,10 +875,14 @@ int main() {
     assert(level_16());
     assert(level_17());
     assert(level_18());
-    // assert(level_19());
+    assert(level_19());
     assert(level_20());
     assert(level_21());
     assert(level_22());
+    // Doesn't pass
+    // assert(level_23());
+    assert(level_24());
+    assert(level_25());
 
     return 0;
 }
