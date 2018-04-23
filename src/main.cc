@@ -873,8 +873,19 @@ bool search(St start_state, const Map& map) {
 // #include "level36.h"
 // #include "level37.h"
 // #include "level38.h"
-#include "level39.h"
+// #include "level39.h"
 // #include "level40.h"
+// #include "level41.h"
+// #include "level42.h"
+// #include "level43.h"
+// #include "level44.h"
+// #include "level45.h"
+// #include "levelstar1.h"
+// #include "levelstar2.h"
+// #include "levelstar3.h"
+// #include "levelstar4.h"
+// #include "levelstar5.h"
+// #include "levelstar6.h"
 
 int main() {
     // assert(level_00());
@@ -926,9 +937,25 @@ int main() {
     // assert(level_37());
     // Teleport
     // assert(level_38());
-    assert(level_39());
-    // OOM
+    // assert(level_39());
     // assert(level_40());
+    // assert(level_41());
+    // assert(level_42());
+    // assert(level_43());
+    // Teleport
+    // assert(level_44());
+    // assert(level_45());
+    // OOM
+    // assert(level_star1());
+    // Too many fruit... Need to parametrize type of fruit_
+    // assert(level_star2());
+    // OOM
+    // assert(level_star3());
+    // assert(level_star4());
+    // Teleport
+    // assert(level_star5());
+    // OOM
+    // assert(level_star6());
 
     return 0;
 }
