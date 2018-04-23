@@ -832,61 +832,101 @@ bool search(St start_state, const Map& map) {
     return win;
 }
 
-#include "level00.h"
-#include "level01.h"
-#include "level02.h"
-#include "level03.h"
-#include "level04.h"
-#include "level05.h"
-#include "level06.h"
-#include "level07.h"
-#include "level08.h"
-#include "level09.h"
-#include "level10.h"
-#include "level11.h"
-#include "level12.h"
-#include "level13.h"
-#include "level14.h"
-#include "level15.h"
-#include "level16.h"
-#include "level17.h"
-#include "level18.h"
-#include "level19.h"
-#include "level20.h"
-#include "level21.h"
-#include "level22.h"
-#include "level23.h"
-#include "level24.h"
-#include "level25.h"
+// #include "level00.h"
+// #include "level01.h"
+// #include "level02.h"
+// #include "level03.h"
+// #include "level04.h"
+// #include "level05.h"
+// #include "level06.h"
+// #include "level07.h"
+// #include "level08.h"
+// #include "level09.h"
+// #include "level10.h"
+// #include "level11.h"
+// #include "level12.h"
+// #include "level13.h"
+// #include "level14.h"
+// #include "level15.h"
+// #include "level16.h"
+// #include "level17.h"
+// #include "level18.h"
+// #include "level19.h"
+// #include "level20.h"
+// #include "level21.h"
+// #include "level22.h"
+// #include "level23.h"
+// #include "level24.h"
+// #include "level25.h"
+// #include "level26.h"
+// #include "level27.h"
+// #include "level28.h"
+// #include "level29.h"
+// #include "level30.h"
+// #include "level31.h"
+// #include "level32.h"
+// #include "level33.h"
+// #include "level34.h"
+// #include "level35.h"
+// #include "level36.h"
+// #include "level37.h"
+// #include "level38.h"
+#include "level39.h"
+// #include "level40.h"
 
 int main() {
-    assert(level_00());
-    assert(level_01());
-    assert(level_02());
-    assert(level_03());
-    assert(level_04());
-    assert(level_05());
-    assert(level_06());
-    assert(level_07());
-    assert(level_08());
-    assert(level_09());
-    assert(level_10());
-    assert(level_11());
-    assert(level_12());
-    assert(level_13());
-    assert(level_14());
-    assert(level_15());
-    assert(level_16());
-    assert(level_17());
-    assert(level_18());
-    assert(level_19());
-    assert(level_20());
-    assert(level_21());
-    assert(level_22());
-    // Doesn't pass
+    // assert(level_00());
+    // assert(level_01());
+    // assert(level_02());
+    // assert(level_03());
+    // assert(level_04());
+    // assert(level_05());
+    // assert(level_06());
+    // assert(level_07());
+    // assert(level_08());
+    // assert(level_09());
+    // assert(level_10());
+    // assert(level_11());
+    // assert(level_12());
+    // assert(level_13());
+    // assert(level_14());
+    // assert(level_15());
+    // assert(level_16());
+    // assert(level_17());
+    // assert(level_18());
+    // assert(level_19());
+    // assert(level_20());
+    // assert(level_21());
+    // assert(level_22());
     // assert(level_23());
-    assert(level_24());
-    assert(level_25());
+    // assert(level_24());
+    // assert(level_25());
+    // assert(level_26());
+    // assert(level_27());
+    // assert(level_28());
+    // OOM
+    // assert(level_29());
+    // Teleport
+    // assert(level_30());
+    // Teleport
+    // assert(level_31());
+    // Teleport
+    // assert(level_32());
+    // Teleport
+    // assert(level_33());
+    // Teleport
+    // assert(level_34());
+    // Teleport
+    // assert(level_35());
+    // Teleport
+    // assert(level_36());
+    // Teleport
+    // assert(level_37());
+    // Teleport
+    // assert(level_38());
+    assert(level_39());
+    // OOM
+    // assert(level_40());
 
     return 0;
 }
