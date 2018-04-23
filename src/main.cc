@@ -5,6 +5,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <sparsehash/dense_hash_map>
 #include <third-party/cityhash/city.h>
 #include <unordered_map>
 #include <vector>
@@ -765,7 +766,9 @@ bool search(St start_state, const Map& map) {
 
     // BFS state
     std::deque<St> todo;
-    std::unordered_map<St, St, hash<St>, eq<St>> seen_states;
+    // std::unordered_map<St, St, hash<St>, eq<St>> seen_states;
+    google::dense_hash_map<St, St, hash<St>, eq<St>> seen_states;
+    seen_states.set_empty_key(null_state);
     size_t steps = 0;
     St win_state = null_state;
     bool win = false;
