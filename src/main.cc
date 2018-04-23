@@ -244,6 +244,11 @@ public:
             if (!snakes_[s].len_) {
                 continue;
             }
+            // There has to be a cleaner way to do this...
+            snakes_[s].len_--;
+            char push_map[H * W];
+            draw_snakes(map, push_map, false);
+            snakes_[s].len_++;
             for (auto dir : dirs) {
                 int delta = Snake::apply_direction(dir);
                 int to = snakes_[s].i_ + delta;
@@ -266,7 +271,7 @@ public:
                             return;
                         }
                     }
-                } else if (is_valid_push(map, snake_map,
+                } else if (is_valid_push(map, push_map,
                                          snakes_[s].id_,
                                          snakes_[s].i_,
                                          delta,
