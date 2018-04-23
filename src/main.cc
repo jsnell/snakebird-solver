@@ -232,7 +232,9 @@ public:
     }
 
     void do_valid_moves(const Map& map,
-                        std::function<bool(State)> fun) {
+                        std::function<bool(State,
+                                           const Snake&,
+                                           Direction)> fun) {
         static Direction dirs[] = {
             UP, RIGHT, DOWN, LEFT,
         };
@@ -252,7 +254,7 @@ public:
                     new_state.snakes_[s].grow(dir);
                     new_state.delete_fruit(fruit_index);
                     if (new_state.process_gravity(map)) {
-                        if (fun(new_state)) {
+                        if (fun(new_state, snakes_[s], dir)) {
                             return;
                         }
                     }
@@ -260,7 +262,7 @@ public:
                     State new_state(*this);
                     new_state.snakes_[s].move(dir);
                     if (new_state.process_gravity(map)) {
-                        if (fun(new_state)) {
+                        if (fun(new_state, snakes_[s], dir)) {
                             return;
                         }
                     }
@@ -277,7 +279,7 @@ public:
                     // print(map);
                     // new_state.print(map);
                     if (new_state.process_gravity(map)) {
-                        if (fun(new_state)) {
+                        if (fun(new_state, snakes_[s], dir)) {
                             return;
                         }
                     }
@@ -775,7 +777,9 @@ bool search(St start_state, const Map& map) {
 
         st.do_valid_moves(map,
                           [&st, &todo, &seen_states, &win, &map,
-                           &win_state](St new_state) {
+                           &win_state](St new_state,
+                                       const typename St::Snake& snake,
+                                       Direction dir) {
                 if (seen_states.find(new_state) != seen_states.end()) {
                     return false;
                 }
