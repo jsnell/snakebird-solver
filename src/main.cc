@@ -20,6 +20,10 @@ class Snake {
 public:
     static const int kDirWidth = 2;
     static const int kDirMask = (1 << kDirWidth) - 1;
+    // +1 since the head doesn't use up a slot in tail_
+    using Tail32 = typename std::conditional<MaxLen <= 16 + 1, uint32_t, uint64_t>::type;
+    using Tail16 = typename std::conditional<MaxLen <= 8 + 1, uint16_t, Tail32>::type;
+    using Tail = typename std::conditional<MaxLen <= 4 + 1, uint8_t, Tail16>::type;
 
     Snake() : tail_(0), i_(0), len_(0) {
     }
@@ -58,7 +62,7 @@ public:
             len_ == other.len_;
     }
 
-    uint32_t tail_;
+    Tail tail_;
     uint16_t i_;
     uint8_t len_;
 } __attribute__((packed));
