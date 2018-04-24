@@ -720,8 +720,8 @@ public:
     }
 
     Snake snakes_[SnakeCount];
-    int16_t gadget_offset_[GadgetCount + GadgetCount % 2];
-    uint16_t win_;
+    int16_t gadget_offset_[GadgetCount];
+    uint8_t win_;
     uint16_t fruit_;
 } __attribute__((packed));
 
