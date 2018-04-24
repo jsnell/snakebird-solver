@@ -719,10 +719,15 @@ public:
         return true;
     }
 
+    // -1 for the win_ flag.
+    using Flags32 = typename std::conditional<FruitCount <= 32 - 1, uint32_t, uint64_t>::type;
+    using Flags16 = typename std::conditional<FruitCount <= 16 - 1, uint16_t, Flags32>::type;
+    using Flags = typename std::conditional<FruitCount <= 8 - 1, uint8_t, Flags16>::type;
+
     Snake snakes_[SnakeCount];
     int16_t gadget_offset_[GadgetCount];
-    uint8_t win_;
-    uint16_t fruit_;
+    Flags win_ : 1,
+          fruit_ : (sizeof(Flags) * 8 - 1);
 } __attribute__((packed));
 
 template<class T>
