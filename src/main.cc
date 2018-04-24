@@ -191,8 +191,8 @@ public:
     }
 
     void print(const Map& map) {
-        char snake_map[H * W];
-        draw_snakes(map, snake_map, true);
+        char obj_map[H * W];
+        draw_snakes(map, obj_map, true);
 
 #if 0
         for (auto snake : snakes_) {
@@ -207,8 +207,8 @@ public:
         for (int i = 0; i < H; ++i) {
             for (int j = 0; j < W; ++j) {
                 int l = i * W + j;
-                if (snake_map[l]) {
-                    printf("%c", snake_map[l]);
+                if (obj_map[l]) {
+                    printf("%c", obj_map[l]);
                 } else if (l == map.exit_) {
                     printf("*");
                 } else {
@@ -235,8 +235,8 @@ public:
         static Direction dirs[] = {
             UP, RIGHT, DOWN, LEFT,
         };
-        char snake_map[H * W];
-        draw_snakes(map, snake_map, false);
+        char obj_map[H * W];
+        draw_snakes(map, obj_map, false);
         for (int s = 0; s < SnakeCount; ++s) {
             if (!snakes_[s].len_) {
                 continue;
@@ -260,7 +260,7 @@ public:
                             return;
                         }
                     }
-                } else if (is_valid_move(map, snake_map, to)) {
+                } else if (is_valid_move(map, obj_map, to)) {
                     State new_state(*this);
                     new_state.snakes_[s].move(dir);
                     if (new_state.process_gravity(map)) {
@@ -303,16 +303,16 @@ public:
         }
     }
 
-    bool destroy_if_intersects_water(const Map& map, int pushed_ids) {
+    bool destroy_if_intersects_hazard(const Map& map, int pushed_ids) {
         for (int i = 0; i < SnakeCount; ++i) {
             if (pushed_ids & (1 << i)) {
-                if (snake_intersects_water(map, snakes_[i]))
+                if (snake_intersects_hazard(map, snakes_[i]))
                     return true;
             }
         }
         for (int i = 0; i < GadgetCount; ++i) {
             if (pushed_ids & (1 << (i + SnakeCount))) {
-                if (gadget_intersects_water(map, i)) {
+                if (gadget_intersects_hazard(map, i)) {
                     gadget_offset_[i] = kGadgetDeleted;
                 }
             }
@@ -336,9 +336,9 @@ public:
     }
 
     bool is_valid_move(const Map& map,
-                       const char* snake_map,
+                       const char* obj_map,
                        int to) {
-        if (!snake_map[to] && map[to] == ' ') {
+        if (!obj_map[to] && map[to] == ' ') {
             return true;
         }
 
@@ -346,19 +346,19 @@ public:
     }
 
     bool is_valid_push(const Map& map,
-                       const char* snake_map,
+                       const char* obj_map,
                        int pusher_id,
                        int push_at,
                        int delta,
                        int* pushed_ids) {
         int to = push_at + delta;
 
-        if (!snake_map[to] || snake_map[to] == pusher_id ||
-            snake_map[to] == 'Q') {
+        if (!obj_map[to] || obj_map[to] == pusher_id ||
+            obj_map[to] == 'Q') {
             return false;
         }
 
-        int index = map_id_to_index(snake_map[to]);
+        int index = map_id_to_index(obj_map[to]);
         *pushed_ids = 1 << index;
 
         bool again = true;
@@ -368,7 +368,7 @@ public:
             for (int i = 0; i < SnakeCount; ++i) {
                 if (*pushed_ids & (1 << i)) {
                     int new_pushed_ids = 0;
-                    if (!snake_can_be_pushed(map, snake_map,
+                    if (!snake_can_be_pushed(map, obj_map,
                                              snakes_[i],
                                              delta,
                                              &new_pushed_ids)) {
@@ -384,7 +384,7 @@ public:
                 if (*pushed_ids & (1 << (SnakeCount + i))) {
                     int new_pushed_ids = 0;
                     if (!gadget_can_be_pushed(map,
-                                              snake_map,
+                                              obj_map,
                                               i,
                                               delta,
                                               &new_pushed_ids)) {
@@ -402,7 +402,7 @@ public:
     }
 
     bool snake_can_be_pushed(const Map& map,
-                             const char* snake_map,
+                             const char* obj_map,
                              const Snake& snake,
                              int delta,
                              int* pushed_ids) {
@@ -413,11 +413,11 @@ public:
             if (map[to] != ' ') {
                 return false;
             }
-            if (snake_map[to] == 'Q') {
+            if (obj_map[to] == 'Q') {
                 return false;
             }
-            if (snake_map[to] && snake_map[to] != snake.id_) {
-                *pushed_ids |= 1 << map_id_to_index(snake_map[to]);
+            if (obj_map[to] && obj_map[to] != snake.id_) {
+                *pushed_ids |= 1 << map_id_to_index(obj_map[to]);
             }
             to -= Snake::apply_direction(snake.tail(j));
         }
@@ -426,7 +426,7 @@ public:
     }
 
     bool gadget_can_be_pushed(const Map& map,
-                              const char* snake_map,
+                              const char* obj_map,
                               int gadget_index,
                               int delta,
                               int* pushed_ids) {
@@ -438,11 +438,11 @@ public:
             if (map[i] != ' ') {
                 return false;
             }
-            if (snake_map[i] == 'Q') {
+            if (obj_map[i] == 'Q') {
                 return false;
             }
-            if (snake_map[i]) {
-                *pushed_ids |= 1 << map_id_to_index(snake_map[i]);
+            if (obj_map[i]) {
+                *pushed_ids |= 1 << map_id_to_index(obj_map[i]);
             }
         }
 
@@ -466,17 +466,17 @@ public:
     }
 
     bool process_gravity(const Map& map) {
-        char snake_map[H * W];
+        char obj_map[H * W];
 
     again:
         check_exits(map);
-        draw_snakes(map, snake_map, false);
+        draw_snakes(map, obj_map, false);
         for (auto& snake : snakes_) {
             if (snake.len_) {
                 bool falling, falling_to_death;
                 int pushed_while_falling = 0;
                 is_snake_falling(map,
-                                 snake_map,
+                                 obj_map,
                                  snake,
                                  &falling,
                                  &falling_to_death,
@@ -486,8 +486,8 @@ public:
                         return false;
                     } else {
                         do_pushes(pushed_while_falling, W);
-                        if (destroy_if_intersects_water(map,
-                                                        pushed_while_falling))
+                        if (destroy_if_intersects_hazard(map,
+                                                         pushed_while_falling))
                             return false;
                         goto again;
                     }
@@ -501,7 +501,7 @@ public:
                 bool falling, falling_to_death;
                 int pushed_while_falling = 0;
                 is_gadget_falling(map,
-                                  snake_map,
+                                  obj_map,
                                   i,
                                   &falling,
                                   &falling_to_death,
@@ -511,8 +511,8 @@ public:
                         gadget_offset_[i] = kGadgetDeleted;
                     } else {
                         do_pushes(pushed_while_falling, W);
-                        if (destroy_if_intersects_water(map,
-                                                        pushed_while_falling))
+                        if (destroy_if_intersects_hazard(map,
+                                                         pushed_while_falling))
                             return false;
                         goto again;
                     }
@@ -553,7 +553,7 @@ public:
     }
 
     void is_snake_falling(const Map& map,
-                          const char* snake_map,
+                          const char* obj_map,
                           const Snake& snake,
                           bool* falling,
                           bool* falling_to_death,
@@ -570,10 +570,10 @@ public:
                 *falling = false;
                 return;
             }
-            if (snake_map[below] &&
-                snake_map[below] != snake.id_) {
+            if (obj_map[below] &&
+                obj_map[below] != snake.id_) {
                 int new_pushed_ids = 0;
-                if (is_valid_push(map, snake_map, snake.id_,
+                if (is_valid_push(map, obj_map, snake.id_,
                                   below - W, W,
                                   &new_pushed_ids)) {
                     pushed_ids |= new_pushed_ids;
@@ -594,7 +594,7 @@ public:
     }
 
     void is_gadget_falling(const Map& map,
-                           const char* snake_map,
+                           const char* obj_map,
                            int gadget_index,
                            bool* falling,
                            bool* falling_to_death,
@@ -618,10 +618,10 @@ public:
                 *falling = false;
                 return;
             }
-            if (snake_map[below] &&
-                snake_map[below] != id) {
+            if (obj_map[below] &&
+                obj_map[below] != id) {
                 int new_pushed_ids = 0;
-                if (is_valid_push(map, snake_map, id, at, W, &new_pushed_ids)) {
+                if (is_valid_push(map, obj_map, id, at, W, &new_pushed_ids)) {
                     pushed_ids |= new_pushed_ids;
                 } else {
                     *falling = false;
@@ -643,7 +643,7 @@ public:
         return snake.i_ == map.exit_;
     }
 
-    bool snake_intersects_water(const Map& map, const Snake& snake) {
+    bool snake_intersects_hazard(const Map& map, const Snake& snake) {
         int i = snake.i_;
         for (int j = 0; j < snake.len_; ++j) {
             if (map[i] == '~' || map[i] == '#')
@@ -654,8 +654,8 @@ public:
         return false;
     }
 
-    bool gadget_intersects_water(const Map& map,
-                                 int gadget_index) {
+    bool gadget_intersects_hazard(const Map& map,
+                                  int gadget_index) {
         int offset = gadget_offset_[gadget_index];
         if (offset == kGadgetDeleted)
             return false;
@@ -668,15 +668,15 @@ public:
         return false;
     }
 
-    void draw_snakes(const Map& map, char* snake_map,
+    void draw_snakes(const Map& map, char* obj_map,
                      bool draw_path) {
-        memset(snake_map, 0, H * W);
+        memset(obj_map, 0, H * W);
         for (auto snake : snakes_) {
-            draw_snake(snake_map, snake, draw_path);
+            draw_snake(obj_map, snake, draw_path);
         }
         for (int i = 0; i < FruitCount; ++i) {
             if (fruit_active(i)) {
-                snake_map[map.fruit_[i]] = 'Q';
+                obj_map[map.fruit_[i]] = 'Q';
             }
         }
         for (int i = 0; i < GadgetCount; ++i) {
@@ -684,23 +684,23 @@ public:
             if (offset != kGadgetDeleted) {
                 const auto& gadget = map.gadgets_[i];
                 for (int j = 0; j < gadget.size_; ++j) {
-                    snake_map[offset + gadget.i_[j]] = '0' + i;
+                    obj_map[offset + gadget.i_[j]] = '0' + i;
                 }
             }
         }
     }
 
-    void draw_snake(char* snake_map, const Snake& snake, bool draw_path) {
+    void draw_snake(char* obj_map, const Snake& snake, bool draw_path) {
         int i = snake.i_;
         for (int j = 0; j < snake.len_; ++j) {
             if (j == 0 || !draw_path) {
-                snake_map[i] = snake.id_;
+                obj_map[i] = snake.id_;
             } else {
                 switch (snake.tail(j - 1)) {
-                case UP: snake_map[i] = '^'; break;
-                case DOWN: snake_map[i] = 'v'; break;
-                case LEFT: snake_map[i] = '<'; break;
-                case RIGHT: snake_map[i] = '>'; break;
+                case UP: obj_map[i] = '^'; break;
+                case DOWN: obj_map[i] = 'v'; break;
+                case LEFT: obj_map[i] = '<'; break;
+                case RIGHT: obj_map[i] = '>'; break;
                 }
             }
             // ^ (32 * (j == 0)); // Use different case for head
