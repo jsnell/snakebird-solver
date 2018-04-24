@@ -473,24 +473,12 @@ public:
         draw_snakes(map, obj_map, false);
         for (auto& snake : snakes_) {
             if (snake.len_) {
-                bool falling, falling_to_death;
-                int pushed_while_falling = 0;
-                is_snake_falling(map,
-                                 obj_map,
-                                 snake,
-                                 &falling,
-                                 &falling_to_death,
-                                 &pushed_while_falling);
+                int falling = is_snake_falling(map, obj_map, snake);
                 if (falling) {
-                    if (falling_to_death) {
+                    do_pushes(falling, W);
+                    if (destroy_if_intersects_hazard(map, falling))
                         return false;
-                    } else {
-                        do_pushes(pushed_while_falling, W);
-                        if (destroy_if_intersects_hazard(map,
-                                                         pushed_while_falling))
-                            return false;
-                        goto again;
-                    }
+                    goto again;
                 }
             }
         }
@@ -498,24 +486,12 @@ public:
         for (int i = 0; i < GadgetCount; ++i) {
             int offset = gadget_offset_[i];
             if (offset != kGadgetDeleted) {
-                bool falling, falling_to_death;
-                int pushed_while_falling = 0;
-                is_gadget_falling(map,
-                                  obj_map,
-                                  i,
-                                  &falling,
-                                  &falling_to_death,
-                                  &pushed_while_falling);
+                int falling = is_gadget_falling(map, obj_map, i);
                 if (falling) {
-                    if (falling_to_death) {
-                        gadget_offset_[i] = kGadgetDeleted;
-                    } else {
-                        do_pushes(pushed_while_falling, W);
-                        if (destroy_if_intersects_hazard(map,
-                                                         pushed_while_falling))
-                            return false;
-                        goto again;
-                    }
+                    do_pushes(falling, W);
+                    if (destroy_if_intersects_hazard(map, falling))
+                        return false;
+                    goto again;
                 }
             }
         }
@@ -552,23 +528,16 @@ public:
         win_ = 1;
     }
 
-    void is_snake_falling(const Map& map,
-                          const char* obj_map,
-                          const Snake& snake,
-                          bool* falling,
-                          bool* falling_to_death,
-                          int* pushed_while_falling) {
+    int is_snake_falling(const Map& map,
+                         const char* obj_map,
+                         const Snake& snake) {
         // The space below the snake's head.
         int below = snake.i_ + W;
-        *falling = true;
-        *falling_to_death = false;
-
         int pushed_ids = 1 << map_id_to_index(snake.id_);
 
         for (int j = 0; j < snake.len_; ++j) {
             if (map[below] == '.') {
-                *falling = false;
-                return;
+                return 0;
             }
             if (obj_map[below] &&
                 obj_map[below] != snake.id_) {
@@ -578,31 +547,20 @@ public:
                                   &new_pushed_ids)) {
                     pushed_ids |= new_pushed_ids;
                 } else {
-                    *falling = false;
-                    return;
+                    return 0;
                 }
-            }
-
-            if (map[below] == '~') {
-                *falling_to_death = true;
             }
 
             below -= Snake::apply_direction(snake.tail(j));
         }
 
-        *pushed_while_falling = pushed_ids;
+        return pushed_ids;
     }
 
-    void is_gadget_falling(const Map& map,
+    int is_gadget_falling(const Map& map,
                            const char* obj_map,
-                           int gadget_index,
-                           bool* falling,
-                           bool* falling_to_death,
-                           int* pushed_while_falling) {
+                           int gadget_index) {
         const auto& gadget = map.gadgets_[gadget_index];
-
-        *falling = true;
-        *falling_to_death = false;
 
         int pushed_ids = 1 << (gadget_index + SnakeCount);
         int id = ('0' + gadget_index);
@@ -611,12 +569,10 @@ public:
             int at = gadget.i_[j] + gadget_offset_[gadget_index];
             int below = at + W;
             if (map[below] == '.') {
-                *falling = false;
-                return;
+                return 0;
             }
             if (map[below] == '#') {
-                *falling = false;
-                return;
+                return 0;
             }
             if (obj_map[below] &&
                 obj_map[below] != id) {
@@ -624,17 +580,12 @@ public:
                 if (is_valid_push(map, obj_map, id, at, W, &new_pushed_ids)) {
                     pushed_ids |= new_pushed_ids;
                 } else {
-                    *falling = false;
-                    return;
+                    return 0;
                 }
-            }
-
-            if (map[below] == '~') {
-                *falling_to_death = true;
             }
         }
 
-        *pushed_while_falling = pushed_ids;
+        return pushed_ids;
     }
 
     bool snake_intersects_exit(const Map& map,
