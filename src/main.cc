@@ -21,14 +21,13 @@ public:
     static const int kDirWidth = 2;
     static const int kDirMask = (1 << kDirWidth) - 1;
 
-    Snake() : tail_(0), i_(0), len_(0), id_(0) {
+    Snake() : tail_(0), i_(0), len_(0) {
     }
 
-    Snake(int id, int i)
+    Snake(int i)
         : tail_(0),
           i_(i),
-          len_(1),
-          id_(id) {
+          len_(1) {
         assert(i_ < H * W);
     }
 
@@ -110,7 +109,7 @@ public:
                            base_map[i] == 'G' ||
                            base_map[i] == 'B') {
                     base_map_[i] = ' ';
-                    Snake snake = Snake(base_map[i], i);
+                    Snake snake = Snake(i);
                     int len = 0;
                     snake.tail_ = trace_tail(base_map, i, &len);
                     snake.len_ += len;
