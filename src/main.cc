@@ -220,18 +220,6 @@ public:
         printf("\n");
     }
 
-    int add_snake(const Snake& snake, int i) {
-        assert(i < SnakeCount);
-        snakes_[i] = snake;
-        return i + 1;
-    }
-
-    // int add_fruit(int r, int c, int i) {
-    //     assert(i < FruitCount);
-    //     fruit_[i] = r * W + c;
-    //     return i + 1;
-    // }
-
     void delete_fruit(int i) {
         fruit_ = fruit_ & ~(1 << i);
     }
@@ -263,7 +251,7 @@ public:
                 int to = snakes_[s].i_ + delta;
                 int pushed_ids = 0;
                 int fruit_index = 0;
-                if (is_valid_grow(map, snakes_[s], to, &fruit_index)) {
+                if (is_valid_grow(map, to, &fruit_index)) {
                     State new_state(*this);
                     new_state.snakes_[s].grow(dir);
                     new_state.delete_fruit(fruit_index);
@@ -272,7 +260,7 @@ public:
                             return;
                         }
                     }
-                } else if (is_valid_move(map, snake_map, snakes_[s], to)) {
+                } else if (is_valid_move(map, snake_map, to)) {
                     State new_state(*this);
                     new_state.snakes_[s].move(dir);
                     if (new_state.process_gravity(map)) {
@@ -333,7 +321,6 @@ public:
     }
 
     bool is_valid_grow(const Map& map,
-                       const Snake& snake,
                        int to,
                        int* fruit_index) {
         for (int i = 0; i < FruitCount; ++i) {
@@ -350,7 +337,7 @@ public:
 
     bool is_valid_move(const Map& map,
                        const char* snake_map,
-                       const Snake& snake, int to) {
+                       int to) {
         if (!snake_map[to] && map[to] == ' ') {
             return true;
         }
@@ -458,8 +445,6 @@ public:
                 *pushed_ids |= 1 << map_id_to_index(snake_map[i]);
             }
         }
-
-        // print(map);
 
         return true;
     }
