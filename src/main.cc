@@ -142,7 +142,7 @@ public:
             assert(exit_);
         }
 
-        uint32_t trace_tail(const char* base_map, int i, int* len) {
+        uint32_t trace_tail(const char* base_map, int i, int* len) const {
             if (base_map[i - 1] == '>') {
                 ++*len;
                 return RIGHT |
@@ -269,7 +269,7 @@ public:
         }
     }
 
-    void print(const Map& map) {
+    void print(const Map& map) const {
         ObjMap obj_map(*this, map, true);
 
 #if 0
@@ -320,7 +320,7 @@ public:
     void do_valid_moves(const Map& map,
                         std::function<bool(State,
                                            const Snake&,
-                                           Direction)> fun) {
+                                           Direction)> fun) const {
         static Direction dirs[] = {
             UP, RIGHT, DOWN, LEFT,
         };
@@ -330,9 +330,9 @@ public:
                 continue;
             }
             // There has to be a cleaner way to do this...
-            snakes_[si].len_--;
-            ObjMap push_map(*this, map, false);
-            snakes_[si].len_++;
+            State push_st(*this);
+            push_st.snakes_[si].len_--;
+            ObjMap push_map(push_st, map, false);
             for (auto dir : dirs) {
                 int delta = Snake::apply_direction(dir);
                 int to = snakes_[si].i_ + delta;
@@ -411,7 +411,7 @@ public:
 
     bool is_valid_grow(const Map& map,
                        int to,
-                       int* fruit_index) {
+                       int* fruit_index) const {
         for (int i = 0; i < FruitCount; ++i) {
             int fruit = map.fruit_[i];
             if (fruit_active(i) &&
@@ -426,7 +426,7 @@ public:
 
     bool is_valid_move(const Map& map,
                        const ObjMap& obj_map,
-                       int to) {
+                       int to) const {
         if (obj_map.no_object_at(to) && empty_terrain_at(map, to)) {
             return true;
         }
@@ -434,7 +434,7 @@ public:
         return false;
     }
 
-    bool empty_terrain_at(const Map& map, int i) {
+    bool empty_terrain_at(const Map& map, int i) const {
         return map[i] == ' ';
     }
 
@@ -443,7 +443,7 @@ public:
                        int pusher_id,
                        int push_at,
                        int delta,
-                       int* pushed_ids) {
+                       int* pushed_ids) const {
         int to = push_at + delta;
 
         if (obj_map.no_object_at(to) ||
@@ -497,7 +497,7 @@ public:
                              const ObjMap& obj_map,
                              int si,
                              int delta,
-                             int* pushed_ids) {
+                             int* pushed_ids) const {
         const Snake& snake = snakes_[si];
         // The space the Snake's head would be pushed to.
         int to = snake.i_ + delta;
@@ -522,7 +522,7 @@ public:
                               const ObjMap& obj_map,
                               int gadget_index,
                               int delta,
-                              int* pushed_ids) {
+                              int* pushed_ids) const {
         const auto& gadget = map.gadgets_[gadget_index];
         int offset = gadget_offset_[gadget_index];
 
@@ -605,7 +605,7 @@ public:
 
     int is_snake_falling(const Map& map,
                          const ObjMap& obj_map,
-                         int si) {
+                         int si) const {
         const Snake& snake = snakes_[si];
         // The space below the snake's head.
         int below = snake.i_ + W;
@@ -635,7 +635,7 @@ public:
 
     int is_gadget_falling(const Map& map,
                           const ObjMap& obj_map,
-                          int gadget_index) {
+                          int gadget_index) const {
         const auto& gadget = map.gadgets_[gadget_index];
 
         int pushed_ids = gadget_mask(gadget_index);
@@ -663,12 +663,12 @@ public:
         return pushed_ids;
     }
 
-    bool snake_head_at_exit(const Map& map, const Snake& snake) {
+    bool snake_head_at_exit(const Map& map, const Snake& snake) const {
         // Only the head of the snake will trigger an exit
         return snake.i_ == map.exit_;
     }
 
-    bool snake_intersects_hazard(const Map& map, const Snake& snake) {
+    bool snake_intersects_hazard(const Map& map, const Snake& snake) const {
         int i = snake.i_;
         for (int j = 0; j < snake.len_; ++j) {
             if (map[i] == '~' || map[i] == '#')
@@ -680,7 +680,7 @@ public:
     }
 
     bool gadget_intersects_hazard(const Map& map,
-                                  int gadget_index) {
+                                  int gadget_index) const {
         int offset = gadget_offset_[gadget_index];
         if (offset == kGadgetDeleted)
             return false;
