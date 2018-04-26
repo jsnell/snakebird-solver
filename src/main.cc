@@ -57,10 +57,26 @@ public:
         return deltas[dir];
     }
 
-    bool operator==(const Snake<H, W, MaxLen> other) const {
+    bool operator==(const Snake& other) const {
         return tail_ == other.tail_ &&
             i_ == other.i_ &&
             len_ == other.len_;
+    }
+    bool operator!=(const Snake& other) const {
+        return !(*this == other);
+    }
+
+    bool operator<(const Snake& other) const {
+        if (i_ != other.i_) {
+            return i_ < other.i_;
+        }
+        if (len_ != other.len_) {
+            return len_ < other.len_;
+        }
+        if (tail_ != other.tail_) {
+            return tail_ < other.tail_;
+        }
+        return false;
     }
 
     Tail tail_;
@@ -367,6 +383,7 @@ public:
                     new_state.snakes_[si].grow(dir);
                     new_state.delete_fruit(fruit_index);
                     if (new_state.process_gravity(map, tele_mask)) {
+                        new_state.canonicalize();
                         if (fun(new_state, snakes_[si], dir)) {
                             return;
                         }
@@ -375,6 +392,7 @@ public:
                     State new_state(*this);
                     new_state.snakes_[si].move(dir);
                     if (new_state.process_gravity(map, tele_mask)) {
+                        new_state.canonicalize();
                         if (fun(new_state, snakes_[si], dir)) {
                             return;
                         }
@@ -392,6 +410,7 @@ public:
                     // print(map);
                     // new_state.print(map);
                     if (new_state.process_gravity(map, tele_mask)) {
+                        new_state.canonicalize();
                         if (fun(new_state, snakes_[si], dir)) {
                             return;
                         }
@@ -399,6 +418,10 @@ public:
                 }
             }
         }
+    }
+
+    void canonicalize() {
+        std::sort(&snakes_[0], &snakes_[SnakeCount]);
     }
 
     uint32_t teleporter_overlap(const Map& map, const ObjMap& objmap) const {
