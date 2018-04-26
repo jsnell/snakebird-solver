@@ -2,6 +2,8 @@ int level_30() {
     const char* base_map =
         "..............."
         ".             ."
+        ".             ."
+        ".             ."
         ".    *        ."
         ".             ."
         ".    .    .T. ."
@@ -12,7 +14,7 @@ int level_30() {
         ".  . .    .   ."
         "~~~~~~~~~~~~~~~";
 
-    using St = State<11, 15, 0, 1, 0, 0>;
+    using St = State<13, 15, 0, 1, 4, 0, 1>;
     St::Map map(base_map);
     St st(map);
     st.print(map);

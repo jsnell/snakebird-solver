@@ -83,11 +83,12 @@ public:
 };
 
 template<int H, int W, int FruitCount, int SnakeCount, int SnakeMaxLen,
-         int GadgetCount=0>
+         int GadgetCount=0, int TeleporterCount=0>
 class State {
 public:
     using Snake = typename ::Snake<H, W, SnakeMaxLen>;
     using Gadget = typename ::Gadget<H, W>;
+    using Teleporter = typename std::pair<int, int>;
 
     static const int16_t kGadgetDeleted = 1 << 15;
 
@@ -98,20 +99,29 @@ public:
             base_map_ = new char[H * W];
             int fruit_count = 0;
             int snake_count = 0;
+            int teleporter_count = 0;
             int max_len = 0;
+            std::unordered_map<int, int> half_teleporter;
             for (int i = 0; i < H * W; ++i) {
-                if (base_map[i] == 'O') {
+                const char c = base_map[i];
+                if (c == 'O') {
                     if (FruitCount) {
                         fruit_[fruit_count++] = i;
                     }
                     base_map_[i] = ' ';
-                } else if (base_map[i] == '*') {
+                } else if (c == '*') {
                     assert(!exit_);
                     base_map_[i] = ' ';
                     exit_ = i;
-                } else if (base_map[i] == 'R' ||
-                           base_map[i] == 'G' ||
-                           base_map[i] == 'B') {
+                } else if (c == 'T') {
+                    if (half_teleporter[c]) {
+                        teleporters_[teleporter_count++] =
+                            std::make_pair(half_teleporter[c], i);
+                    } else {
+                        half_teleporter[c] = i;
+                    }
+                    base_map_[i] = ' ';
+                } else if (c == 'R' || c == 'G' || c == 'B') {
                     base_map_[i] = ' ';
                     Snake snake = Snake(i);
                     int len = 0;
@@ -119,16 +129,16 @@ public:
                     snake.len_ += len;
                     snakes_[snake_count++] = snake;
                     max_len = std::max(max_len, (int) snake.len_);
-                } else if (isdigit(base_map[i])) {
+                } else if (isdigit(c)) {
                     base_map_[i] = ' ';
-                    gadgets_[base_map[i] - '0'].add(i);
-                } else if (base_map[i] == '>' ||
-                           base_map[i] == '<' ||
-                           base_map[i] == '^' ||
-                           base_map[i] == 'v') {
+                    uint32_t index = c - '0';
+                    if (index < GadgetCount) {
+                        gadgets_[index].add(i);
+                    }
+                } else if (c == '>' || c == '<' || c == '^' || c == 'v') {
                     base_map_[i] = ' ';
                 } else {
-                    base_map_[i] = base_map[i];
+                    base_map_[i] = c;
                 }
             }
 
@@ -139,6 +149,7 @@ public:
             }
             assert(fruit_count == FruitCount);
             assert(snake_count == SnakeCount);
+            assert(teleporter_count == TeleporterCount);
             assert(exit_);
         }
 
@@ -176,6 +187,7 @@ public:
         int fruit_[FruitCount];
         Snake snakes_[SnakeCount];
         Gadget gadgets_[GadgetCount];
+        Teleporter teleporters_[TeleporterCount];
     };
 
     class ObjMap {
@@ -202,7 +214,10 @@ public:
             return obj_map_[i];
         }
         int mask_at(int i) const {
-            return 1 << (id_at(i) - 1);
+            if (id_at(i)) {
+                return 1 << (id_at(i) - 1);
+            }
+            return 0;
         }
 
     private:
@@ -285,6 +300,12 @@ public:
         for (int i = 0; i < H; ++i) {
             for (int j = 0; j < W; ++j) {
                 int l = i * W + j;
+                bool teleport = false;
+                for (auto t : map.teleporters_) {
+                    if (t.first == l || t.second == l) {
+                        teleport = true;
+                    }
+                }
                 if (!obj_map.no_object_at(l)) {
                     int id = obj_map.id_at(l);
                     char c;
@@ -300,6 +321,8 @@ public:
                     printf("%c", c);
                 } else if (l == map.exit_) {
                     printf("*");
+                } else if (teleport) {
+                    printf("X");
                 } else {
                     printf("%c", map[l]);
                 }
@@ -325,6 +348,7 @@ public:
             UP, RIGHT, DOWN, LEFT,
         };
         ObjMap obj_map(*this, map, false);
+        uint32_t tele_mask = teleporter_overlap(map, obj_map);
         for (int si = 0; si < SnakeCount; ++si) {
             if (!snakes_[si].len_) {
                 continue;
@@ -342,15 +366,15 @@ public:
                     State new_state(*this);
                     new_state.snakes_[si].grow(dir);
                     new_state.delete_fruit(fruit_index);
-                    if (new_state.process_gravity(map)) {
+                    if (new_state.process_gravity(map, tele_mask)) {
                         if (fun(new_state, snakes_[si], dir)) {
                             return;
                         }
                     }
-                } else if (is_valid_move(map, obj_map, to)) {
+                } if (is_valid_move(map, obj_map, to)) {
                     State new_state(*this);
                     new_state.snakes_[si].move(dir);
-                    if (new_state.process_gravity(map)) {
+                    if (new_state.process_gravity(map, tele_mask)) {
                         if (fun(new_state, snakes_[si], dir)) {
                             return;
                         }
@@ -367,7 +391,7 @@ public:
                     // printf("++\n");
                     // print(map);
                     // new_state.print(map);
-                    if (new_state.process_gravity(map)) {
+                    if (new_state.process_gravity(map, tele_mask)) {
                         if (fun(new_state, snakes_[si], dir)) {
                             return;
                         }
@@ -375,6 +399,18 @@ public:
                 }
             }
         }
+    }
+
+    uint32_t teleporter_overlap(const Map& map, const ObjMap& objmap) const {
+        uint32_t mask = 0;
+        const uint32_t width = SnakeCount + GadgetCount;
+        for (int i = 0; i < TeleporterCount; ++i) {
+            mask |=
+                ((objmap.mask_at(map.teleporters_[i].first)) |
+                 (objmap.mask_at(map.teleporters_[i].second) << width))
+                << (width * 2 * i);
+        }
+        return mask;
     }
 
     void do_pushes(const ObjMap& obj_map, int pushed_ids, int push_delta) {
@@ -542,10 +578,126 @@ public:
         return true;
     }
 
-    bool process_gravity(const Map& map) {
+    bool process_teleports(const Map& map, const ObjMap& obj_map,
+                           uint32_t orig_tele_mask,
+                           uint32_t new_tele_mask) {
+        uint32_t only_new = new_tele_mask & ~orig_tele_mask;
+        int test = 1;
+        bool teleported = false;
+        // This is over-engineered for the possibility of multiple
+        // teleporters. But those don't actually appear in the game,
+        // and there are some interesting semantic problems with them
+        // with two different teleporter pairs being triggered at the
+        // same time, so it's just a guess that this is how they'd
+        // work.
+        for (int i = 0; i < TeleporterCount; ++i) {
+            int delta = map.teleporters_[i].second -
+                map.teleporters_[i].first;
+            for (int dir = 0; dir < 2; ++dir) {
+                for (int si = 0; si < SnakeCount; ++si) {
+                    if (test & only_new) {
+                        if (try_snake_teleport(map, obj_map, si, delta)) {
+                            teleported = true;
+                        }
+                    }
+                    test <<= 1;
+                }
+                for (int gi = 0; gi < GadgetCount; ++gi) {
+                    if (test & only_new) {
+                        if (try_gadget_teleport(map, obj_map, gi, delta)) {
+                            teleported = true;
+                        }
+                    }
+                    test <<= 1;
+                }
+                // Delta was from A to B, just negate it for
+                // handling the B to A case.
+                delta = -delta;
+            }
+        }
+
+        return teleported;
+    }
+
+    bool try_snake_teleport(const Map& map,
+                            const ObjMap& obj_map,
+                            int si, int delta) {
+        const Snake& snake = snakes_[si];
+        // The space where the head teleports to
+        int to = snake.i_ + delta;
+
+        for (int j = 0; j < snake.len_; ++j) {
+            if (map[to] != ' ') {
+                return false;
+            }
+            // If segment X of a snake would teleport into the space
+            // occupied by segment Y of the same snake pre-teleport,
+            // is the teleport blocked? I'm assuming yes. If not,
+            // this should be a foreign_object_at instead.
+            if (!obj_map.no_object_at(to)) {
+                return false;
+            }
+
+            to -= Snake::apply_direction(snake.tail(j));
+        }
+
+        snakes_[si].i_ += delta;
+        return true;
+    }
+
+    bool try_gadget_teleport(const Map& map,
+                             const ObjMap& obj_map,
+                             int gi,
+                             int delta) {
+        const auto& gadget = map.gadgets_[gi];
+        int offset = gadget_offset_[gi] + delta;
+
+        for (int j = 0; j < gadget.size_; ++j) {
+            int to = gadget.i_[j] + offset;
+            if (map[to] != ' ') {
+                return false;
+            }
+            if (!obj_map.no_object_at(to)) {
+                return false;
+            }
+        }
+
+        // There's a funny thing here where a sparse gadget could
+        // theoretically teleport halfway over a map edge, since
+        // the solid border tile protection doesn't work there.
+        // But if a solution ended up abusing that, it'd be easy to
+        // fix by just adding more padding to the map.
+
+        gadget_offset_[gi] += delta;
+        return true;
+    }
+
+    bool process_gravity(const Map& map, uint32_t orig_tele_mask) {
     again:
+        // FIXME. Figure out if exits and teleporters have different
+        // priority. Is it possible to construct a case where that
+        // matters?
         check_exits(map);
+        // FIXME: The teleporter + gravity interaction doesn't quite
+        // match the actual game. There you can have the scenario where
+        // snake A supports snake B. Then:
+        // 1. A moves, and goes through a teleporter
+        // 2. Both A and B drop due to gravity
+        // 3. B is now on a teleporter. The remote side is not blocked
+        //    by A. But B does not teleport.
+        // Constructing more exact test cases is proving tricky.
         ObjMap obj_map(*this, map, false);
+        uint32_t new_tele_mask = teleporter_overlap(map, obj_map);
+        if (new_tele_mask & ~orig_tele_mask) {
+            if (process_teleports(map, obj_map, orig_tele_mask,
+                                  new_tele_mask)) {
+                orig_tele_mask = teleporter_overlap(map,
+                                                    ObjMap(*this, map, false));
+                goto again;
+            }
+        }
+        orig_tele_mask = new_tele_mask;
+
         for (int si = 0; si < SnakeCount; ++si) {
             if (snakes_[si].len_) {
                 int falling = is_snake_falling(map, obj_map, si);
@@ -694,7 +846,7 @@ public:
         return false;
     }
 
-    bool operator==(const State<H, W, FruitCount, SnakeCount, SnakeMaxLen, GadgetCount> other) const {
+    bool operator==(const State& other) const {
         for (int i = 0; i < SnakeCount; ++i) {
             if (!(snakes_[i] == other.snakes_[i])) {
                 return false;
@@ -750,7 +902,7 @@ int search(St start_state, const Map& map) {
     St null_state;
 
     // Just in case the starting state is invalid.
-    start_state.process_gravity(map);
+    start_state.process_gravity(map, 0);
 
     // BFS state
     std::deque<St> todo;
@@ -864,7 +1016,7 @@ int search(St start_state, const Map& map) {
 #include "level44.h"
 #include "level45.h"
 #include "levelstar1.h"
-// #include "levelstar2.h"
+#include "levelstar2.h"
 #include "levelstar3.h"
 #include "levelstar4.h"
 #include "levelstar5.h"
@@ -908,43 +1060,31 @@ int main() {
     EXPECT_EQ(35, level_26());
     EXPECT_EQ(49, level_27());
     EXPECT_EQ(49, level_28());
-    // OOM
+    // // OOM
     // EXPECT_EQ(0, level_29());
-    // Teleport
-    // EXPECT_EQ(15, level_30());
-    // Teleport
-    // EXPECT_EQ(8, level_31());
-    // Teleport
-    // EXPECT_EQ(21, level_32());
-    // Teleport
-    // EXPECT_EQ(42, level_33());
-    // Teleport
-    // EXPECT_EQ(17, level_34());
-    // Teleport
-    // EXPECT_EQ(29, level_35());
-    // Teleport
-    // EXPECT_EQ(29, level_36());
-    // Teleport
-    // EXPECT_EQ(16, level_37());
-    // Teleport
-    // EXPECT_EQ(28, level_38());
+    EXPECT_EQ(15, level_30());
+    EXPECT_EQ(8, level_31());
+    EXPECT_EQ(21, level_32());
+    EXPECT_EQ(42, level_33());
+    EXPECT_EQ(17, level_34());
+    EXPECT_EQ(29, level_35());
+    EXPECT_EQ(29, level_36());
+    EXPECT_EQ(16, level_37());
+    EXPECT_EQ(28, level_38());
     EXPECT_EQ(53, level_39());
     EXPECT_EQ(51, level_40());
     EXPECT_EQ(34, level_41());
     EXPECT_EQ(42, level_42());
     EXPECT_EQ(36, level_43());
-    // Teleport
-    // EXPECT_EQ(0, level_44());
+    EXPECT_EQ(36, level_44());
     EXPECT_EQ(77, level_45());
     // OOM
     // EXPECT_EQ(0, level_star1());
-    // Too many fruit... Need to parametrize type of fruit_
-    // EXPECT_EQ(60, level_star2());
+    EXPECT_EQ(60, level_star2());
     // OOM
     // EXPECT_EQ(0, level_star3());
     EXPECT_EQ(44, level_star4());
-    // Teleport
-    // EXPECT_EQ(69, level_star5());
+    EXPECT_EQ(69, level_star5());
     // OOM
     // EXPECT_EQ(0, level_star6());
 
