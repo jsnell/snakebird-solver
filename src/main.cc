@@ -149,7 +149,10 @@ public:
                     base_map_[i] = ' ';
                     uint32_t index = c - '0';
                     if (index < GadgetCount) {
-                        gadgets_[index].add(i);
+                        if (!gadgets_[index].size_) {
+                            gadget_offset_[index] = i;
+                        }
+                        gadgets_[index].add(i - gadget_offset_[index]);
                     }
                 } else if (c == '>' || c == '<' || c == '^' || c == 'v') {
                     base_map_[i] = ' ';
@@ -203,6 +206,7 @@ public:
         int fruit_[FruitCount];
         Snake snakes_[SnakeCount];
         Gadget gadgets_[GadgetCount];
+        int gadget_offset_[GadgetCount] = { };
         Teleporter teleporters_[TeleporterCount];
     };
 
@@ -297,6 +301,9 @@ public:
     State(const Map& map) : State() {
         for (int i = 0; i < SnakeCount; ++i) {
             snakes_[i] = map.snakes_[i];
+        }
+        for (int i = 0; i < GadgetCount; ++i) {
+            gadget_offset_[i] = map.gadget_offset_[i];
         }
     }
 
