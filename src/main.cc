@@ -65,13 +65,11 @@ struct Packer {
 template<int H, int W, int MaxLen>
 class Snake {
 public:
-    static const int kDirWidth = 2;
-    static const int kDirMask = (1 << kDirWidth) - 1;
-    // +1 since the head doesn't use up a slot in tail_
-    using Tail32 = typename std::conditional<MaxLen <= 16 + 1, uint32_t, uint64_t>::type;
-    using Tail16 = typename std::conditional<MaxLen <= 8 + 1, uint16_t, Tail32>::type;
-    using Tail = typename std::conditional<MaxLen <= 4 + 1, uint8_t, Tail16>::type;
-    using MapIndex = typename std::conditional<H*W < 255, uint8_t, uint16_t>::type;
+    static const int kDirBits = 2;
+    static const uint64_t kDirMask = (1 << kDirBits) - 1;
+    static const int kTailBits = ((MaxLen - 1) * kDirBits);
+    static const int kIndexBits = std::ceil(std::log2(H * W));
+    static const int kLenBits = std::ceil(std::log2(MaxLen + 1));
 
     Snake() : tail_(0), i_(0), len_(0) {
     }
@@ -86,31 +84,22 @@ public:
     void grow(Direction dir) {
         i_ += apply_direction(dir);
         ++len_;
-        tail_ = (tail_ << kDirWidth) | dir;
+        tail_ = (tail_ << kDirBits) | dir;
     }
 
     void move(Direction dir) {
         i_ += apply_direction(dir);
-        tail_ &= ~(kDirMask << ((len_ - 2) * kDirWidth));
-        tail_ = (tail_ << kDirWidth) | dir;
+        tail_ &= ~(kDirMask << ((len_ - 2) * kDirBits));
+        tail_ = (tail_ << kDirBits) | dir;
     }
 
     Direction tail(int i) const {
-        return Direction((tail_ >> (i * kDirWidth)) & kDirMask);
+        return Direction((tail_ >> (i * kDirBits)) & kDirMask);
     }
 
     static int apply_direction(Direction dir) {
         static int deltas[] = { -W, 1, W, -1 };
         return deltas[dir];
-    }
-
-    bool operator==(const Snake& other) const {
-        return tail_ == other.tail_ &&
-            i_ == other.i_ &&
-            len_ == other.len_;
-    }
-    bool operator!=(const Snake& other) const {
-        return !(*this == other);
     }
 
     bool operator<(const Snake& other) const {
@@ -126,10 +115,31 @@ public:
         return false;
     }
 
-    Tail tail_;
-    MapIndex i_;
+    template<class P>
+    uint64_t unpack(const P* packer, size_t at) {
+        tail_ = 0;
+        at = packer->extract(tail_, kTailBits, at);
+        at = packer->extract(i_, kIndexBits, at);
+        at = packer->extract(len_, kLenBits, at);
+        return at;
+    }
+
+    template<class P>
+    uint64_t pack(P* packer, size_t at) const {
+        at = packer->deposit(tail_, kTailBits, at);
+        at = packer->deposit(i_, kIndexBits, at);
+        at = packer->deposit(len_, kLenBits, at);
+        return at;
+    }
+
+    static constexpr uint64_t packed_width() {
+        return kTailBits + kIndexBits + kLenBits;
+    }
+
+    uint64_t tail_;
+    int32_t i_;
     uint8_t len_;
-} __attribute__((packed));
+};
 
 template<int H, int W>
 class Gadget {
@@ -153,7 +163,7 @@ public:
     using Gadget = typename ::Gadget<H, W>;
     using Teleporter = typename std::pair<int, int>;
 
-    static const int16_t kGadgetDeleted = 1 << 15;
+    static const int16_t kGadgetDeleted = 0;
 
     class Map {
     public:
@@ -223,22 +233,22 @@ public:
             if (base_map[i - 1] == '>') {
                 ++*len;
                 return RIGHT |
-                    (trace_tail(base_map, i - 1, len) << Snake::kDirWidth);
+                    (trace_tail(base_map, i - 1, len) << Snake::kDirBits);
             }
             if (base_map[i + 1] == '<') {
                 ++*len;
                 return LEFT |
-                    (trace_tail(base_map, i + 1, len) << Snake::kDirWidth);
+                    (trace_tail(base_map, i + 1, len) << Snake::kDirBits);
             }
             if (base_map[i - W] == 'v') {
                 ++*len;
                 return DOWN |
-                    (trace_tail(base_map, i - W, len) << Snake::kDirWidth);
+                    (trace_tail(base_map, i - W, len) << Snake::kDirBits);
             }
             if (base_map[i + W] == '^') {
                 ++*len;
                 return UP |
-                    (trace_tail(base_map, i + W, len) << Snake::kDirWidth);
+                    (trace_tail(base_map, i + W, len) << Snake::kDirBits);
             }
 
             return 0;
@@ -337,12 +347,12 @@ public:
     static int gadget_id(int i) { return (1 + i + SnakeCount); }
     static int gadget_mask(int i) { return 1 << (SnakeCount + i); }
 
-    State() :
-        win_(0),
-        fruit_((1 << FruitCount) - 1) {
+    State() {
         for (int i = 0; i < GadgetCount; ++i) {
             gadget_offset_[i] = 0;
         }
+
+        fruit_ = (1 << FruitCount) - 1;
     }
 
     State(const Map& map) : State() {
@@ -815,21 +825,19 @@ public:
                     snake.len_ = 0;
                     snake.i_ = 0;
                     snake.tail_ = 0;
-                    update_win();
                 }
             }
         }
     }
 
-    void update_win() {
+    bool win() {
         for (int si = 0; si < SnakeCount; ++si) {
             if (snakes_[si].len_) {
-                win_ = 0;
-                return;
+                return false;
             }
         }
 
-        win_ = 1;
+        return true;
     }
 
     int is_snake_falling(const Map& map,
@@ -923,34 +931,67 @@ public:
         return false;
     }
 
-    bool operator==(const State& other) const {
-        for (int i = 0; i < SnakeCount; ++i) {
-            if (!(snakes_[i] == other.snakes_[i])) {
-                return false;
-            }
-        }
-        for (int i = 0; i < GadgetCount; ++i) {
-            if (gadget_offset_[i] != other.gadget_offset_[i]) {
-                return false;
-            }
-        }
-        if (win_ != other.win_ ||
-            fruit_ != other.fruit_) {
-            return false;
-        }
-        return true;
+    static constexpr uint64_t packed_width() {
+        return Snake::packed_width() * SnakeCount +
+            FruitCount +
+            Snake::kIndexBits * GadgetCount;
     }
 
-    // -1 for the win_ flag.
-    using Flags32 = typename std::conditional<FruitCount <= 32 - 1, uint32_t, uint64_t>::type;
-    using Flags16 = typename std::conditional<FruitCount <= 16 - 1, uint16_t, Flags32>::type;
-    using Flags = typename std::conditional<FruitCount <= 8 - 1, uint8_t, Flags16>::type;
+    struct Packed {
+        using P = Packer<packed_width()>;
+
+        Packed() {}
+        Packed(const State& st) {
+            st.pack(&p_, 0);
+        }
+
+        bool operator==(const Packed& other) const {
+            return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) == 0;
+        }
+
+        bool operator<(const Packed& other) const {
+            return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) < 0;
+        }
+
+        P p_;
+    };
+
+    State(const Packed& p) {
+        unpack(&p.p_, 0);
+    };
+
+    template<class P>
+    uint64_t unpack(const P* packer, size_t at) {
+        for (int si = 0; si < SnakeCount; ++si) {
+            at = snakes_[si].unpack(packer, at);
+        }
+        at = packer->extract(fruit_, FruitCount, at);
+        for (int gi = 0 ; gi < GadgetCount; ++gi) {
+            at = packer->extract(gadget_offset_[gi],
+                                 Snake::kIndexBits,
+                                 at);
+        }
+        return at;
+    }
+
+    template<class P>
+    uint64_t pack(P* packer, size_t at) const {
+        for (int si = 0; si < SnakeCount; ++si) {
+            at = snakes_[si].pack(packer, at);
+        }
+        at = packer->deposit(fruit_, FruitCount, at);
+        for (int gi = 0 ; gi < GadgetCount; ++gi) {
+            at = packer->deposit(gadget_offset_[gi],
+                                 Snake::kIndexBits,
+                                 at);
+        }
+        return at;
+    }
 
     Snake snakes_[SnakeCount];
-    int16_t gadget_offset_[GadgetCount];
-    Flags win_ : 1,
-          fruit_ : (sizeof(Flags) * 8 - 1);
-} __attribute__((packed));
+    uint64_t fruit_;
+    int32_t gadget_offset_[GadgetCount];
+};
 
 template<class T>
 struct hash {
@@ -975,58 +1016,120 @@ struct eq {
 
 template<class St, class Map>
 int search(St start_state, const Map& map) {
-    printf("%ld\n", sizeof(St));
+    using Packed = typename St::Packed;
     St null_state;
 
     // Just in case the starting state is invalid.
     start_state.process_gravity(map, 0);
 
+    struct st_pair {
+        st_pair() {
+        }
+
+        st_pair(const St& a, const St& b) : a(a), b(b) {
+        }
+
+        bool operator<(const st_pair& other) {
+            return a < other.a;
+        }
+        bool operator==(const st_pair& other) {
+            return a == other.a;
+        }
+
+        Packed a, b;
+    };
+    printf("bits=%ld packed_bytes=%ld\n", St::packed_width(),
+           sizeof(Packed));
+
     // BFS state
-    std::deque<St> todo;
+    std::deque<Packed> todo;
+    std::deque<st_pair> new_states;
+    std::deque<st_pair> seen_states;
     // std::unordered_map<St, St, hash<St>, eq<St>> seen_states;
     // google::dense_hash_map<St, St, hash<St>, eq<St>> seen_states;
     // seen_states.set_empty_key(null_state);
-    google::sparse_hash_map<St, St, hash<St>, eq<St>> seen_states;
+    // google::sparse_hash_map<St, St, hash<St>, eq<St>> seen_states;
     size_t steps = 0;
     St win_state = null_state;
     bool win = false;
 
-    todo.push_back(start_state);
-    seen_states[start_state] = null_state;
+    new_states.push_back(st_pair(start_state, null_state));
 
-    while (!todo.empty() && !win) {
-        auto st = todo.front();
-        todo.pop_front();
+    {
+        Packed p(start_state);
+        St s(p);
+        s.print(map);
+    }
 
-        ++steps;
-        if (!(steps & 0xffff)) {
-            printf(".");
-            fflush(stdout);
+    while (!new_states.empty()) {
+        todo.clear();
+        std::sort(new_states.begin(), new_states.end());
+        auto new_end = std::unique(new_states.begin(), new_states.end());
+        new_states.erase(new_end, new_states.end());
+        std::deque<st_pair> new_seen_states;
+        int discard = 0;
+        size_t new_states_size = new_states.size();
+        while (true) {
+            bool have_new = !new_states.empty();
+            bool have_seen = !seen_states.empty();
+            if (have_new && have_seen) {
+                const auto& new_front = new_states.front().a;
+                const auto& seen_front = seen_states.front().a;
+                if (new_front < seen_front) {
+                    todo.push_back(new_front);
+                    new_seen_states.push_back(new_states.front());
+                    new_states.pop_front();
+                } else if (new_front == seen_front) {
+                    new_states.pop_front();
+                    ++discard;
+                    new_seen_states.push_back(seen_states.front());
+                    seen_states.pop_front();
+                } else {
+                    new_seen_states.push_back(seen_states.front());
+                    seen_states.pop_front();
+                }
+            } else if (have_new) {
+                todo.push_back(new_states.front().a);
+                new_seen_states.push_back(new_states.front());
+                new_states.pop_front();
+            } else if (have_seen) {
+                new_seen_states.push_back(seen_states.front());
+                seen_states.pop_front();
+            } else {
+                break;
+            }
         }
 
-        // printf("%lx [%lx]\n", hash<St>()(st),
-        //        hash<St>()(seen_states[st]));
-        // st.print(map);
+        seen_states = std::move(new_seen_states);
+        printf("seen:%ld new:%ld todo:%ld disc:%d\n", seen_states.size(),
+               new_states_size, todo.size(), discard);
 
-        st.do_valid_moves(map,
-                          [&st, &todo, &seen_states, &win, &map,
-                           &win_state](St new_state,
-                                       const typename St::Snake& snake,
-                                       Direction dir) {
-                if (seen_states.find(new_state) != seen_states.end()) {
-                    return false;
-                }
+        if (win) {
+            break;
+        }
 
-                seen_states[new_state] = st;
-                todo.push_back(new_state);
+        for (auto packed : todo) {
+            St st(packed);
 
-                if (new_state.win_) {
-                    win_state = new_state;
-                    win = true;
-                    return true;
-                }
-                return false;
-            });
+            if (!(++steps & 0xffff)) {
+                printf(".");
+                fflush(stdout);
+            }
+
+            st.do_valid_moves(map,
+                              [&st, &new_states, &win, &map,
+                               &win_state](St new_state,
+                                           const typename St::Snake& snake,
+                                           Direction dir) {
+                                  new_states.push_back(st_pair(new_state, st));
+                                  if (new_state.win()) {
+                                      win_state = new_state;
+                                      win = true;
+                                      return true;
+                                  }
+                                  return false;
+                              });
+        }
     }
 
     printf("%s\n",
@@ -1034,9 +1137,12 @@ int search(St start_state, const Map& map) {
 
     int moves = 0;
     if (win) {
-        while (!(win_state == start_state)) {
+        while (!(Packed(win_state) == Packed(start_state))) {
             win_state.print(map);
-            win_state = seen_states[win_state];
+            win_state =
+                std::lower_bound(seen_states.begin(),
+                                 seen_states.end(),
+                                 st_pair(win_state, null_state))->b;
             ++moves;
         }
     }
