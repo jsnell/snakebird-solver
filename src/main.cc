@@ -18,7 +18,7 @@ enum Direction {
 
 template<size_t Bits>
 struct Packer {
-    static const int Bytes = std::ceil(Bits / 8.0);
+    static const int Bytes = (Bits + 7) / 8;
 
     Packer() {
     }
@@ -62,14 +62,24 @@ struct Packer {
     uint8_t bytes_[Bytes] = { 0 };
 };
 
+template<uint64_t I>
+struct integer_length {
+    enum { value = 1 + integer_length<I/2>::value, };
+};
+
+template<>
+struct integer_length<1> {
+    enum { value = 1 };
+};
+
 template<int H, int W, int MaxLen>
 class Snake {
 public:
     static const int kDirBits = 2;
     static const uint64_t kDirMask = (1 << kDirBits) - 1;
     static const int kTailBits = ((MaxLen - 1) * kDirBits);
-    static const int kIndexBits = std::ceil(std::log2(H * W));
-    static const int kLenBits = std::ceil(std::log2(MaxLen + 1));
+    static const int kIndexBits = integer_length<H * W>::value;
+    static const int kLenBits = integer_length<MaxLen + 1>::value;
 
     Snake() : tail_(0), i_(0), len_(0) {
     }
