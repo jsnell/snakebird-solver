@@ -22,7 +22,7 @@ int level_35() {
         ".    ..   ."
         "~~~~~~~~~~~";
 
-    using St = State<21, 11, 2, 1, 5, 0, 1>;
+    using St = State<21, 11, 2, 1, 6, 0, 1>;
     St::Map map(base_map);
     St st(map);
     st.print(map);
