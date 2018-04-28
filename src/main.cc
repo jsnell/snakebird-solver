@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -13,6 +14,53 @@
 
 enum Direction {
     UP, RIGHT, DOWN, LEFT,
+};
+
+template<size_t Bits>
+struct Packer {
+    static const int Bytes = std::ceil(Bits / 8.0);
+
+    Packer() {
+    }
+
+    size_t deposit(uint64_t data, size_t width, size_t at) {
+        while (width) {
+            size_t offset = (at % 8);
+            int bits_to_deposit = std::min(width, 8 - offset);
+            int deposit_at = at / 8;
+            bytes_[deposit_at] |= data << offset;
+            data >>= bits_to_deposit;
+            at += bits_to_deposit;
+            width -= bits_to_deposit;
+        }
+
+        return at;
+    }
+
+    template<typename T>
+    uint64_t extract(T& data, size_t width, size_t at) const {
+        T out = 0;
+        int out_offset = 0;
+        while (width) {
+            int extract_from = at / 8;
+            size_t offset = (at % 8);
+            int bits_to_extract = std::min(width, 8 - offset);
+            out |=
+                (// Move bits to extract to low order bits.
+                 (bytes_[extract_from] >> offset) &
+                 // Mask out anything else.
+                 ((1 << bits_to_extract) - 1))
+                << out_offset;
+            out_offset += bits_to_extract;
+            at += bits_to_extract;
+            width -= bits_to_extract;
+        }
+
+        data = out;
+        return at;
+    }
+
+    uint8_t bytes_[Bytes] = { 0 };
 };
 
 template<int H, int W, int MaxLen>
