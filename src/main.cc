@@ -141,7 +141,6 @@ public:
     uint8_t len_;
 };
 
-template<int H, int W>
 class Gadget {
 public:
     Gadget() : size_(0) {
@@ -151,8 +150,30 @@ public:
         i_[size_++] = i;
     }
 
+    bool operator<(const Gadget& other) const {
+        if (size_ != other.size_) {
+            return size_ < other.size_;
+        }
+
+        for (int i = 0; i < size_; ++i) {
+            if (i_[i] != other.i_[i]) {
+                return i_[i] < other.i_[i];
+            }
+        }
+
+        // Note: it's important for the State canonicalization
+        // that initial_offset_ does not affect the sorting.
+        return false;
+    }
+
+    uint16_t initial_offset_ = 0;
     uint16_t size_;
     uint16_t i_[8];
+};
+
+struct GadgetState {
+    uint16_t template_ ;
+    uint16_t offset_ = 0;
 };
 
 template<int H, int W, int FruitCount, int SnakeCount, int SnakeMaxLen,
@@ -160,7 +181,6 @@ template<int H, int W, int FruitCount, int SnakeCount, int SnakeMaxLen,
 class State {
 public:
     using Snake = typename ::Snake<H, W, SnakeMaxLen>;
-    using Gadget = typename ::Gadget<H, W>;
     using Teleporter = typename std::pair<int, int>;
 
     static const int16_t kGadgetDeleted = 0;
@@ -205,18 +225,19 @@ public:
                 } else if (isdigit(c)) {
                     base_map_[i] = ' ';
                     uint32_t index = c - '0';
-                    if (index < GadgetCount) {
-                        if (!gadgets_[index].size_) {
-                            gadget_offset_[index] = i;
-                        }
-                        gadgets_[index].add(i - gadget_offset_[index]);
+                    assert(index < GadgetCount);
+                    if (!gadgets_[index].size_) {
+                        gadgets_[index].initial_offset_ = i;
                     }
+                    gadgets_[index].add(i - gadgets_[index].initial_offset_);
                 } else if (c == '>' || c == '<' || c == '^' || c == 'v') {
                     base_map_[i] = ' ';
                 } else {
                     base_map_[i] = c;
                 }
             }
+
+            std::sort(&gadgets_[0], &gadgets_[GadgetCount]);
 
             if (SnakeMaxLen < max_len + FruitCount) {
                 fprintf(stderr, "Expected SnakeMaxLen >= %d, got %d\n",
@@ -263,7 +284,6 @@ public:
         int fruit_[FruitCount];
         Snake snakes_[SnakeCount];
         Gadget gadgets_[GadgetCount];
-        int gadget_offset_[GadgetCount] = { };
         Teleporter teleporters_[TeleporterCount];
     };
 
@@ -311,7 +331,7 @@ public:
                 }
             }
             for (int i = 0; i < GadgetCount; ++i) {
-                int offset = st.gadget_offset_[i];
+                int offset = st.gadgets_[i].offset_;
                 if (offset != kGadgetDeleted) {
                     const auto& gadget = map.gadgets_[i];
                     for (int j = 0; j < gadget.size_; ++j) {
@@ -348,11 +368,10 @@ public:
     static int gadget_mask(int i) { return 1 << (SnakeCount + i); }
 
     State() {
-        for (int i = 0; i < GadgetCount; ++i) {
-            gadget_offset_[i] = 0;
-        }
-
         fruit_ = (1 << FruitCount) - 1;
+        for (int i = 0; i < GadgetCount; ++i) {
+            gadgets_[i].template_ = i;
+        }
     }
 
     State(const Map& map) : State() {
@@ -360,7 +379,8 @@ public:
             snakes_[i] = map.snakes_[i];
         }
         for (int i = 0; i < GadgetCount; ++i) {
-            gadget_offset_[i] = map.gadget_offset_[i];
+            gadgets_[i].offset_ = map.gadgets_[i].initial_offset_;
+            gadgets_[i].template_ = i;
         }
     }
 
@@ -447,7 +467,7 @@ public:
                     new_state.snakes_[si].grow(dir);
                     new_state.delete_fruit(fruit_index);
                     if (new_state.process_gravity(map, tele_mask)) {
-                        new_state.canonicalize();
+                        new_state.canonicalize(map);
                         if (fun(new_state, snakes_[si], dir)) {
                             return;
                         }
@@ -456,7 +476,7 @@ public:
                     State new_state(*this);
                     new_state.snakes_[si].move(dir);
                     if (new_state.process_gravity(map, tele_mask)) {
-                        new_state.canonicalize();
+                        new_state.canonicalize(map);
                         if (fun(new_state, snakes_[si], dir)) {
                             return;
                         }
@@ -474,7 +494,7 @@ public:
                     // print(map);
                     // new_state.print(map);
                     if (new_state.process_gravity(map, tele_mask)) {
-                        new_state.canonicalize();
+                        new_state.canonicalize(map);
                         if (fun(new_state, snakes_[si], dir)) {
                             return;
                         }
@@ -484,8 +504,22 @@ public:
         }
     }
 
-    void canonicalize() {
+    void canonicalize(const Map& map) {
         std::sort(&snakes_[0], &snakes_[SnakeCount]);
+        if (GadgetCount > 0) {
+            std::sort(&gadgets_[0], &gadgets_[GadgetCount],
+                      [&map] (const GadgetState& a, const GadgetState& b) {
+                          const Gadget& ag = map.gadgets_[a.template_];
+                          const Gadget& bg = map.gadgets_[b.template_];
+                          if (ag < bg) {
+                              return true;
+                          }
+                          if (bg < ag) {
+                              return false;
+                          }
+                          return a.offset_ < b.offset_;
+                      });
+        }
     }
 
     uint32_t teleporter_overlap(const Map& map, const ObjMap& objmap) const {
@@ -508,7 +542,7 @@ public:
         }
         for (int i = 0; i < GadgetCount; ++i) {
             if (pushed_ids & gadget_mask(i)) {
-                gadget_offset_[i] += push_delta;
+                gadgets_[i].offset_ += push_delta;
             }
         }
     }
@@ -525,7 +559,7 @@ public:
         for (int i = 0; i < GadgetCount; ++i) {
             if (pushed_ids & gadget_mask(i)) {
                 if (gadget_intersects_hazard(map, i)) {
-                    gadget_offset_[i] = kGadgetDeleted;
+                    gadgets_[i].offset_ = kGadgetDeleted;
                 }
             }
         }
@@ -647,7 +681,7 @@ public:
                               int delta,
                               int* pushed_ids) const {
         const auto& gadget = map.gadgets_[gadget_index];
-        int offset = gadget_offset_[gadget_index];
+        int offset = gadgets_[gadget_index].offset_;
 
         for (int j = 0; j < gadget.size_; ++j) {
             int i = gadget.i_[j] + offset + delta;
@@ -737,7 +771,7 @@ public:
                              int gi,
                              int delta) {
         const auto& gadget = map.gadgets_[gi];
-        int offset = gadget_offset_[gi] + delta;
+        int offset = gadgets_[gi].offset_ + delta;
 
         for (int j = 0; j < gadget.size_; ++j) {
             int to = gadget.i_[j] + offset;
@@ -755,7 +789,7 @@ public:
         // But if a solution ended up abusing that, it'd be easy to
         // fix by just adding more padding to the map.
 
-        gadget_offset_[gi] += delta;
+        gadgets_[gi].offset_ += delta;
         return true;
     }
 
@@ -798,7 +832,7 @@ public:
         }
 
         for (int i = 0; i < GadgetCount; ++i) {
-            int offset = gadget_offset_[i];
+            int offset = gadgets_[i].offset_;
             if (offset != kGadgetDeleted) {
                 int falling = is_gadget_falling(map, obj_map, i);
                 if (falling) {
@@ -879,7 +913,7 @@ public:
         int id = gadget_id(gadget_index);
 
         for (int j = 0; j < gadget.size_; ++j) {
-            int at = gadget.i_[j] + gadget_offset_[gadget_index];
+            int at = gadget.i_[j] + gadgets_[gadget_index].offset_;
             int below = at + W;
             if (map[below] == '.') {
                 return 0;
@@ -918,7 +952,7 @@ public:
 
     bool gadget_intersects_hazard(const Map& map,
                                   int gadget_index) const {
-        int offset = gadget_offset_[gadget_index];
+        int offset = gadgets_[gadget_index].offset_;
         if (offset == kGadgetDeleted)
             return false;
         const auto& gadget = map.gadgets_[gadget_index];
@@ -956,7 +990,7 @@ public:
         P p_;
     };
 
-    State(const Packed& p) {
+    State(const Packed& p) : State() {
         unpack(&p.p_, 0);
     };
 
@@ -967,7 +1001,7 @@ public:
         }
         at = packer->extract(fruit_, FruitCount, at);
         for (int gi = 0 ; gi < GadgetCount; ++gi) {
-            at = packer->extract(gadget_offset_[gi],
+            at = packer->extract(gadgets_[gi].offset_,
                                  Snake::kIndexBits,
                                  at);
         }
@@ -981,7 +1015,7 @@ public:
         }
         at = packer->deposit(fruit_, FruitCount, at);
         for (int gi = 0 ; gi < GadgetCount; ++gi) {
-            at = packer->deposit(gadget_offset_[gi],
+            at = packer->deposit(gadgets_[gi].offset_,
                                  Snake::kIndexBits,
                                  at);
         }
@@ -989,8 +1023,8 @@ public:
     }
 
     Snake snakes_[SnakeCount];
+    GadgetState gadgets_[GadgetCount];
     uint64_t fruit_;
-    int32_t gadget_offset_[GadgetCount];
 };
 
 template<class T>
@@ -1243,8 +1277,7 @@ int main() {
     EXPECT_EQ(35, level_26());
     EXPECT_EQ(49, level_27());
     EXPECT_EQ(49, level_28());
-    // // OOM
-    // EXPECT_EQ(0, level_29());
+    EXPECT_EQ(45, level_29());
     EXPECT_EQ(15, level_30());
     EXPECT_EQ(8, level_31());
     EXPECT_EQ(21, level_32());
