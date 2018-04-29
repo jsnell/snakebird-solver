@@ -1050,27 +1050,6 @@ public:
     uint64_t fruit_;
 };
 
-template<class T>
-struct hash {
-    uint64_t operator()(const T& key) const {
-        return CityHash64(reinterpret_cast<const char*>(&key),
-                          sizeof(key));
-        // return CityHash64(reinterpret_cast<const char*>(&key.snakes_),
-        //                   sizeof(key.snakes_));
-        // CityHash64(reinterpret_cast<const char*>(&key.fruit_),
-        //            sizeof(key.fruit_));
-        // const uint32_t* data = reinterpret_cast<const uint32_t*>(&key);
-        // return xxhash32<sizeof(key) / 4>::scalar(data, 0x8fc5249f);
-    }
-};
-
-template<class T>
-struct eq {
-    bool operator()(const T& a, const T& b) const {
-        return a == b;
-    }
-};
-
 template<class St, class Map>
 int search(St start_state, const Map& map) {
     using Packed = typename St::Packed;
@@ -1102,10 +1081,6 @@ int search(St start_state, const Map& map) {
     std::deque<Packed> todo;
     std::deque<st_pair> new_states;
     std::deque<st_pair> seen_states;
-    // std::unordered_map<St, St, hash<St>, eq<St>> seen_states;
-    // google::dense_hash_map<St, St, hash<St>, eq<St>> seen_states;
-    // seen_states.set_empty_key(null_state);
-    // google::sparse_hash_map<St, St, hash<St>, eq<St>> seen_states;
     size_t steps = 0;
     St win_state = null_state;
     bool win = false;
@@ -1118,14 +1093,17 @@ int search(St start_state, const Map& map) {
         s.print(map);
     }
 
+    size_t total_states = 0;
+    size_t depth = 0;
     while (!new_states.empty()) {
         todo.clear();
         std::sort(new_states.begin(), new_states.end());
+        size_t new_states_size = new_states.size();
+        total_states += new_states_size;
         auto new_end = std::unique(new_states.begin(), new_states.end());
         new_states.erase(new_end, new_states.end());
         std::deque<st_pair> new_seen_states;
         int discard = 0;
-        size_t new_states_size = new_states.size();
         while (true) {
             bool have_new = !new_states.empty();
             bool have_seen = !seen_states.empty();
@@ -1158,8 +1136,10 @@ int search(St start_state, const Map& map) {
         }
 
         seen_states = std::move(new_seen_states);
-        printf("seen:%ld new:%ld todo:%ld disc:%d\n", seen_states.size(),
-               new_states_size, todo.size(), discard);
+        printf("depth: %ld unique:%ld new:%ld (total: %ld, delta %ld)\n",
+               depth++,
+               seen_states.size(), todo.size(),
+               total_states, new_states_size);
 
         if (win) {
             break;
