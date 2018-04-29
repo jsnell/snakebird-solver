@@ -1174,11 +1174,12 @@ int search(St start_state, const Map& map) {
             }
 
             st.do_valid_moves(map,
-                              [&st, &new_states, &win, &map,
+                              [&packed, &new_states, &win, &map,
                                &win_state](St new_state,
                                            const typename St::Snake& snake,
                                            Direction dir) {
-                                  new_states.push_back(st_pair(new_state, st));
+                                  new_states.push_back(
+                                      st_pair(new_state, packed));
                                   if (new_state.win()) {
                                       win_state = new_state;
                                       win = true;
