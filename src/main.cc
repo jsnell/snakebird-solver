@@ -990,11 +990,24 @@ public:
         }
 
         bool operator==(const Packed& other) const {
-            return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) == 0;
+            // Bizarre, neither g++ or clang++ is inlining these
+            // memcmps despite the static length.
+            //
+            // return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) == 0;
+            for (int i = 0; i < P::Bytes; ++i) {
+                if (p_.bytes_[i] != other.p_.bytes_[i])
+                    return false;
+            }
+            return true;
         }
 
         bool operator<(const Packed& other) const {
-            return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) < 0;
+            // return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) < 0;
+            for (int i = 0; i < P::Bytes; ++i) {
+                if (p_.bytes_[i] != other.p_.bytes_[i])
+                    return p_.bytes_[i] < other.p_.bytes_[i];
+            }
+            return false;
         }
 
         P p_;
