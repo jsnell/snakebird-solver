@@ -1048,6 +1048,41 @@ public:
     uint64_t fruit_;
 };
 
+template<class Seen, class Todo, class New>
+Seen dedup(Seen* seen_states, Todo* todo, New* new_states) {
+    Seen new_seen_states;
+    while (true) {
+        bool have_new = !new_states->empty();
+        bool have_seen = !seen_states->empty();
+        if (have_new && have_seen) {
+            const auto& new_front = new_states->front().a;
+            const auto& seen_front = seen_states->front().a;
+            if (new_front < seen_front) {
+                todo->push_back(new_front);
+                new_seen_states.push_back(new_states->front());
+                new_states->pop_front();
+            } else if (new_front == seen_front) {
+                new_states->pop_front();
+                new_seen_states.push_back(seen_states->front());
+                seen_states->pop_front();
+            } else {
+                new_seen_states.push_back(seen_states->front());
+                seen_states->pop_front();
+            }
+        } else if (have_new) {
+            todo->push_back(new_states->front().a);
+            new_seen_states.push_back(new_states->front());
+            new_states->pop_front();
+        } else if (have_seen) {
+            new_seen_states.push_back(seen_states->front());
+            seen_states->pop_front();
+        } else {
+            break;
+        }
+    }
+    return new_seen_states;
+}
+
 template<class St, class Map>
 int search(St start_state, const Map& map) {
     using Packed = typename St::Packed;
@@ -1094,46 +1129,18 @@ int search(St start_state, const Map& map) {
     size_t total_states = 0;
     size_t depth = 0;
     while (!new_states.empty()) {
+        // Empty the todo list
         todo.clear();
+        // Sort and dedup just new_states
         std::sort(new_states.begin(), new_states.end());
         size_t new_states_size = new_states.size();
         total_states += new_states_size;
         auto new_end = std::unique(new_states.begin(), new_states.end());
         new_states.erase(new_end, new_states.end());
-        std::deque<st_pair> new_seen_states;
-        int discard = 0;
-        while (true) {
-            bool have_new = !new_states.empty();
-            bool have_seen = !seen_states.empty();
-            if (have_new && have_seen) {
-                const auto& new_front = new_states.front().a;
-                const auto& seen_front = seen_states.front().a;
-                if (new_front < seen_front) {
-                    todo.push_back(new_front);
-                    new_seen_states.push_back(new_states.front());
-                    new_states.pop_front();
-                } else if (new_front == seen_front) {
-                    new_states.pop_front();
-                    ++discard;
-                    new_seen_states.push_back(seen_states.front());
-                    seen_states.pop_front();
-                } else {
-                    new_seen_states.push_back(seen_states.front());
-                    seen_states.pop_front();
-                }
-            } else if (have_new) {
-                todo.push_back(new_states.front().a);
-                new_seen_states.push_back(new_states.front());
-                new_states.pop_front();
-            } else if (have_seen) {
-                new_seen_states.push_back(seen_states.front());
-                seen_states.pop_front();
-            } else {
-                break;
-            }
-        }
-
-        seen_states = std::move(new_seen_states);
+        // Build a new todo list from the entries in new_states not
+        // contained in seen_states.
+        seen_states = dedup(&seen_states, &todo, &new_states);
+        // std::move(new_seen_states);
         printf("depth: %ld unique:%ld new:%ld (total: %ld, delta %ld)\n",
                depth++,
                seen_states.size(), todo.size(),
