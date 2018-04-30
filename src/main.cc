@@ -1095,7 +1095,7 @@ int search(St start_state, const Map& map) {
         st_pair() {
         }
 
-        st_pair(const St& a, const St& b) : a(a), b(b) {
+        st_pair(const St& a, uint8_t depth) : a(a), depth(depth) {
         }
 
         bool operator<(const st_pair& other) {
@@ -1105,7 +1105,8 @@ int search(St start_state, const Map& map) {
             return a == other.a;
         }
 
-        Packed a, b;
+        Packed a;
+        uint8_t depth = 0;
     };
     printf("bits=%ld packed_bytes=%ld\n", St::packed_width(),
            sizeof(Packed));
@@ -1118,7 +1119,7 @@ int search(St start_state, const Map& map) {
     St win_state = null_state;
     bool win = false;
 
-    new_states.push_back(st_pair(start_state, null_state));
+    new_states.push_back(st_pair(start_state, 0));
 
     {
         Packed p(start_state);
@@ -1159,13 +1160,13 @@ int search(St start_state, const Map& map) {
             }
 
             st.do_valid_moves(map,
-                              [&packed, &new_states, &win, &map,
+                              [&depth, &new_states, &win, &map,
                                &win_state](St new_state,
                                            int si,
                                            Direction dir) {
                                   new_state.canonicalize(map);
                                   new_states.push_back(
-                                      st_pair(new_state, packed));
+                                      st_pair(new_state, depth));
                                   if (new_state.win()) {
                                       win_state = new_state;
                                       win = true;
@@ -1179,21 +1180,45 @@ int search(St start_state, const Map& map) {
     printf("%s\n",
            win ? "Win" : "No solution");
 
-    int moves = 0;
     if (win) {
-        while (!(Packed(win_state) == Packed(start_state))) {
-            win_state.print(map);
-            win_state =
-                std::lower_bound(seen_states.begin(),
-                                 seen_states.end(),
-                                 st_pair(win_state, null_state))->b;
-            ++moves;
+        win_state.print(map);
+
+        Packed target(win_state);
+        auto cmp = [](const st_pair& a, const st_pair &b) {
+            return a.depth < b.depth;
+        };
+        std::sort(seen_states.begin(), seen_states.end(), cmp);
+        for (int d = depth - 1; d >= 0; --d) {
+            auto it = std::lower_bound(seen_states.begin(),
+                                       seen_states.end(),
+                                       st_pair(null_state, d),
+                                       cmp);
+            while (it != seen_states.end() && it->depth == d) {
+                St st(it->a);
+                if (st.do_valid_moves(map,
+                                      [&target, &map](St new_state,
+                                                      int si,
+                                                      Direction dir) {
+                                          new_state.canonicalize(map);
+                                          Packed p(new_state);
+                                          if (p == target) {
+                                              return true;
+                                          }
+                                          return false;
+                                      })) {
+                    st.print(map);
+                    target = it->a;
+                    break;
+                } else {
+                    ++it;
+                }
+            }
         }
     }
 
-    printf("%ld states, %d moves\n", steps, moves);
+    printf("%ld states, %ld moves\n", steps, depth);
 
-    return moves;
+    return win ? depth - 1 : 0;
 }
 
 #include "level00.h"
