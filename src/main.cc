@@ -79,7 +79,7 @@ public:
     static const uint64_t kDirMask = (1 << kDirBits) - 1;
     static const int kTailBits = ((MaxLen - 1) * kDirBits);
     static const int kIndexBits = integer_length<H * W>::value;
-    static const int kLenBits = integer_length<MaxLen + 1>::value;
+    static const int kLenBits = integer_length<MaxLen>::value;
 
     Snake() : tail_(0), i_(0), len_(0) {
     }
