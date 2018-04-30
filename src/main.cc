@@ -450,9 +450,9 @@ public:
         return (fruit_ & (1 << i)) != 0;
     }
 
-    void do_valid_moves(const Map& map,
+    bool do_valid_moves(const Map& map,
                         std::function<bool(State,
-                                           const Snake&,
+                                           int si,
                                            Direction)> fun) const {
         static Direction dirs[] = {
             UP, RIGHT, DOWN, LEFT,
@@ -477,18 +477,16 @@ public:
                     new_state.snakes_[si].grow(dir);
                     new_state.delete_fruit(fruit_index);
                     if (new_state.process_gravity(map, tele_mask)) {
-                        new_state.canonicalize(map);
-                        if (fun(new_state, snakes_[si], dir)) {
-                            return;
+                        if (fun(new_state, si, dir)) {
+                            return true;
                         }
                     }
                 } if (is_valid_move(map, obj_map, to)) {
                     State new_state(*this);
                     new_state.snakes_[si].move(dir);
                     if (new_state.process_gravity(map, tele_mask)) {
-                        new_state.canonicalize(map);
-                        if (fun(new_state, snakes_[si], dir)) {
-                            return;
+                        if (fun(new_state, si, dir)) {
+                            return true;
                         }
                     }
                 } else if (is_valid_push(map, push_map,
@@ -504,14 +502,14 @@ public:
                     // print(map);
                     // new_state.print(map);
                     if (new_state.process_gravity(map, tele_mask)) {
-                        new_state.canonicalize(map);
-                        if (fun(new_state, snakes_[si], dir)) {
-                            return;
+                        if (fun(new_state, si, dir)) {
+                            return true;
                         }
                     }
                 }
             }
         }
+        return false;
     }
 
     void canonicalize(const Map& map) {
@@ -1156,8 +1154,9 @@ int search(St start_state, const Map& map) {
             st.do_valid_moves(map,
                               [&packed, &new_states, &win, &map,
                                &win_state](St new_state,
-                                           const typename St::Snake& snake,
+                                           int si,
                                            Direction dir) {
+                                  new_state.canonicalize(map);
                                   new_states.push_back(
                                       st_pair(new_state, packed));
                                   if (new_state.win()) {
