@@ -18,54 +18,11 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 
+#include "bit-packer.h"
+#include "file-backed-array.h"
+
 enum Direction {
     UP, RIGHT, DOWN, LEFT,
-};
-
-template<size_t Bits>
-struct Packer {
-    static const int Bytes = (Bits + 7) / 8;
-
-    Packer() {
-    }
-
-    template<typename T>
-    size_t deposit(T data, size_t width, size_t at) {
-        while (width) {
-            size_t offset = (at % 8);
-            int bits_to_deposit = std::min(width, 8 - offset);
-            int deposit_at = at / 8;
-            bytes_[deposit_at] |= data << offset;
-            data >>= bits_to_deposit;
-            at += bits_to_deposit;
-            width -= bits_to_deposit;
-        }
-
-        return at;
-    }
-
-    template<typename T>
-    uint64_t extract(T& data, size_t width, size_t at) const {
-        T out = 0;
-        size_t out_offset = 0;
-        while (width) {
-            int extract_from = at / 8;
-            size_t offset = (at % 8);
-            size_t bits_to_extract = std::min(width, 8 - offset);
-            T extracted =
-                (bytes_[extract_from] >> offset) &
-                ((1 << bits_to_extract) - 1);
-            out |= extracted << out_offset;
-            out_offset += bits_to_extract;
-            at += bits_to_extract;
-            width -= bits_to_extract;
-        }
-
-        data = out;
-        return at;
-    }
-
-    uint8_t bytes_[Bytes] = { 0 };
 };
 
 template<uint64_t I>
@@ -1054,101 +1011,13 @@ public:
     uint64_t fruit_;
 };
 
-template<class T>
-class file_backed_mmap_array {
-public:
-    explicit file_backed_mmap_array(size_t capacity)
-        : capacity_(capacity),
-          size_(0) {
-        fd_ = open("file-backed-tmp", O_CREAT | O_RDWR);
-        assert(fd_ >= 0);
-
-        size_t len = capacity_ * sizeof(T);
-        lseek(fd_, len, SEEK_SET);
-        write(fd_, "\0", 1);
-        void* map = mmap(NULL, len, PROT_READ | PROT_WRITE,
-                         MAP_SHARED, fd_, 0);
-        unlink("file-backed-tmp");
-        if (map == MAP_FAILED) {
-            perror("mmap");
-            abort();
-        }
-        array_ = (T*) map;
-    };
-
-    explicit file_backed_mmap_array(const std::string& filename,
-                                    size_t size)
-        : size_(size) {
-        fd_ = open(filename.c_str(), O_RDWR);
-        assert(fd_ >= 0);
-        capacity_ = size_;
-        void* map = mmap(NULL, capacity_ * sizeof(T),
-                         PROT_READ | PROT_WRITE,
-                         MAP_SHARED, fd_, 0);
-        if (map == MAP_FAILED) {
-            perror("mmap");
-            abort();
-        }
-        array_ = (T*) map;
-    };
-
-    file_backed_mmap_array(const file_backed_mmap_array& other) = delete;
-
-    file_backed_mmap_array(file_backed_mmap_array&& other)
-        : capacity_(other.capacity_),
-          size_(other.size_),
-          fd_(other.fd_),
-          array_(other.array_) {
-        other.array_ = NULL;
-    }
-
-    void operator=(file_backed_mmap_array&& other) {
-        if (array_) {
-            munmap((void*) array_, capacity_ * sizeof(T));
-            close(fd_);
-        }
-        capacity_ = other.capacity_;
-        size_ = other.size_;
-        fd_ = other.fd_;
-        array_ = other.array_;
-        other.array_ = NULL;
-    }
-
-    ~file_backed_mmap_array() {
-        if (array_) {
-            munmap((void*) array_, capacity_ * sizeof(T));
-            close(fd_);
-        }
-    }
-
-    bool empty() const { return size_ > 0; }
-
-    T* begin() { return array_; }
-    T* end() { return array_ + size_; }
-    size_t size() const { return size_; }
-
-    void push_back(const T& data) {
-        assert(size_ < capacity_);
-        array_[size_++] = data;
-    }
-
-//private:
-    size_t capacity_;
-    size_t size_;
-    int fd_;
-    T* array_ = NULL;
-};
-
-
-template<class Seen, class Todo, class New>
-void dedup(Seen* seen_states, Todo* todo, New* new_states) {
-    // Seen new_seen_states;
-    // new_seen_states.reserve(seen_states->size() + new_states->size());
-    Seen new_seen_states(seen_states->size() + new_states->size());
-    auto new_it = new_states->begin();
+template<class Seen, class Todo, class T>
+void dedup(Seen* seen_states, Todo* todo, T* new_begin, T* new_end) {
+    Seen new_seen_states;
+    auto new_it = new_begin;
     auto seen_it = seen_states->begin();
     while (true) {
-        bool have_new = new_it != new_states->end();
+        bool have_new = new_it != new_end;
         bool have_seen = seen_it != seen_states->end();
         if (have_new && have_seen) {
             const auto& new_front = new_it->a;
@@ -1186,7 +1055,7 @@ void sort_in_chunks(T* start, T* end, Cmp cmp) {
     size_t chunk_elems = chunk_bytes / elem_size;
     for (T* s = start; s < end; ) {
         size_t actual_elems = std::min(chunk_elems, (size_t) (end - s));
-        T* copy_s = new T[chunk_elems];
+        T* copy_s = new T[actual_elems];
         T* e = s + actual_elems;
         T* copy_e = copy_s + actual_elems;
         std::copy(s, e, copy_s);
@@ -1206,6 +1075,45 @@ void sort_in_chunks(T* start, T* end, Cmp cmp) {
         merge_elems *= 2;
     }
 }
+
+template<class St>
+class OutputState {
+public:
+    explicit OutputState(int i) {
+    }
+
+    OutputState(const OutputState& other) = delete;
+    void operator=(const OutputState& other) = delete;
+
+    OutputState(OutputState&& other)
+        :  seen_states_(std::move(other.seen_states_)),
+           new_states_(std::move(other.new_states_)) {
+    }
+
+    void insert(St st) {
+        new_states_.push_back(st);
+    }
+
+    void flush() {
+        seen_states_.freeze();
+        new_states_.freeze();
+    }
+
+    void start_iteration() {
+        new_states_ = file_backed_mmap_array<St>();
+    }
+
+    file_backed_mmap_array<St>& seen_states_mmap() {
+        return seen_states_;
+    }
+
+    file_backed_mmap_array<St>& new_states_mmap() {
+        return new_states_;
+    }
+
+    file_backed_mmap_array<St> seen_states_;
+    file_backed_mmap_array<St> new_states_;
+};
 
 template<class St, class Map>
 int search(St start_state, const Map& map) {
@@ -1237,7 +1145,6 @@ int search(St start_state, const Map& map) {
 
     // BFS state
     std::vector<Packed> todo;
-    file_backed_mmap_array<st_pair> seen_states(1);
     size_t steps = 0;
     St win_state = null_state;
     bool win = false;
@@ -1248,45 +1155,49 @@ int search(St start_state, const Map& map) {
         s.print(map);
     }
 
-    FILE* new_states_fp = fopen("new-states", "w+");
-    assert(new_states_fp != NULL);
-    int new_states_count = 0;
-    // new_states.push_back(st_pair(start_state, 0));
-    fwrite(Packed(start_state).p_.bytes_, sizeof(Packed),
-           1,
-           new_states_fp);
-    fputc(0, new_states_fp);
-    new_states_count++;
+    std::vector<OutputState<st_pair>> outputs;
+    const int kShards = (1 << 4);
+    for (int i = 0; i < kShards; ++i) {
+        outputs.emplace_back(OutputState<st_pair>(i));
+    }
+
+    outputs[0].insert(st_pair(start_state, 0));
 
     size_t total_states = 0;
     size_t depth = 0;
-    while (new_states_count) {
-        fflush(new_states_fp);
-        file_backed_mmap_array<st_pair> new_states("new-states",
-                                                   new_states_count);
+    while (1) {
         // Empty the todo list
         todo.clear();
-        // Sort and dedup just new_states
-        auto cmp = [](const st_pair& a, const st_pair &b) { return a < b;};
-        sort_in_chunks(new_states.begin(), new_states.end(), cmp);
-        // std::stable_sort(new_states.begin(), new_states.end());
-        size_t new_states_size = new_states.size();
-        total_states += new_states_size;
-        auto new_end = std::unique(new_states.begin(), new_states.end());
-        new_states.size_ = (new_end - new_states.begin());
-        // new_states.erase(new_end, new_states.end());
-        // Build a new todo list from the entries in new_states not
-        // contained in seen_states.
-        dedup(&seen_states, &todo, &new_states);
+
+        size_t seen_states_size = 0;
+        size_t new_states_size = 0;
+        for (auto& output : outputs) {
+            output.flush();
+            file_backed_mmap_array<st_pair>& new_states =
+                output.new_states_mmap();
+            file_backed_mmap_array<st_pair>& seen_states =
+                output.seen_states_mmap();
+            // Sort and dedup just new_states
+            auto cmp = [](const st_pair& a, const st_pair &b) { return a < b;};
+            sort_in_chunks(new_states.begin(), new_states.end(), cmp);
+
+            seen_states_size += seen_states.size();
+            new_states_size += new_states.size();
+            total_states += new_states.size();
+            auto new_end = std::unique(new_states.begin(), new_states.end());
+
+            // Build a new todo list from the entries in new_states not
+            // contained in seen_states.
+            dedup(&seen_states, &todo, new_states.begin(), new_end);
+            output.start_iteration();
+        }
+
         printf("depth: %ld unique:%ld new:%ld (total: %ld, delta %ld)\n",
                depth++,
-               seen_states.size(), todo.size(),
+               seen_states_size, todo.size(),
                total_states, new_states_size);
 
-        new_states_count = 0;
-        fseek(new_states_fp, 0, SEEK_SET);
-
-        if (win) {
+        if (win || todo.empty()) {
             break;
         }
 
@@ -1299,20 +1210,17 @@ int search(St start_state, const Map& map) {
             }
 
             st.do_valid_moves(map,
-                              [&depth, &new_states_fp, &win, &map,
-                               &new_states_count,
+                              [&depth, &outputs, &win, &map,
                                &win_state](St new_state,
                                            int si,
                                            Direction dir) {
                                   new_state.canonicalize(map);
-                                  fwrite(Packed(new_state).p_.bytes_,
-                                         sizeof(Packed),
-                                         1,
-                                         new_states_fp);
-                                  fputc(depth, new_states_fp);
+                                  st_pair pair(new_state, depth);
+                                  auto hash = CityHash64((char*) pair.a.p_.bytes_,
+                                                         sizeof(pair.a.p_.bytes_));
+                                  outputs[hash & (kShards - 1)].insert(pair);
                                   // new_states.push_back(
                                   //     st_pair(new_state, depth));
-                                  new_states_count++;
                                   if (new_state.win()) {
                                       win_state = new_state;
                                       win = true;
@@ -1330,17 +1238,36 @@ int search(St start_state, const Map& map) {
         win_state.print(map);
 
         Packed target(win_state);
-        auto cmp = [](const st_pair& a, const st_pair &b) {
-            return a.depth < b.depth;
-        };
-        sort_in_chunks(seen_states.begin(), seen_states.end(), cmp);
+
+        std::vector<OutputState<st_pair>> outputs_by_depth;
+        for (int i = 0; i < depth; ++i) {
+            outputs_by_depth.emplace_back(OutputState<st_pair>(i));
+        }
+        while (!outputs.empty()) {
+            auto& output = outputs.back();
+            output.flush();
+            file_backed_mmap_array<st_pair>& seen_states =
+                output.seen_states_mmap();
+            for (const auto& st : seen_states) {
+                outputs_by_depth[st.depth].insert(st);
+            }
+            outputs.pop_back();
+        }
+        for (auto& output : outputs_by_depth) {
+            output.flush();
+            file_backed_mmap_array<st_pair>& new_states =
+                output.new_states_mmap();
+            auto cmp = [](const st_pair& a, const st_pair &b) {
+                return a < b;
+            };
+            sort_in_chunks(new_states.begin(), new_states.end(), cmp);
+        }
+
         for (int d = depth - 1; d >= 0; --d) {
-            auto it = std::lower_bound(seen_states.begin(),
-                                       seen_states.end(),
-                                       st_pair(null_state, d),
-                                       cmp);
-            while (it != seen_states.end() && it->depth == d) {
-                St st(it->a);
+            file_backed_mmap_array<st_pair>& seen_states =
+                outputs_by_depth[d].new_states_mmap();
+            for (const auto& pair : seen_states) {
+                St st(pair.a);
                 if (st.do_valid_moves(map,
                                       [&target, &map](St new_state,
                                                       int si,
@@ -1353,10 +1280,8 @@ int search(St start_state, const Map& map) {
                                           return false;
                                       })) {
                     st.print(map);
-                    target = it->a;
+                    target = st;
                     break;
-                } else {
-                    ++it;
                 }
             }
         }
