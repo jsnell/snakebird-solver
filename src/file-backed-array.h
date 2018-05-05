@@ -22,7 +22,7 @@ public:
     }
 
     void operator=(file_backed_mmap_array&& other) {
-        maybe_unmap();
+        maybe_close();
         buffer_ = std::move(other.buffer_);
         frozen_ = other.frozen_;
         size_ = other.size_;
@@ -33,15 +33,20 @@ public:
     }
 
     ~file_backed_mmap_array() {
-        maybe_unmap();
+        maybe_close();
     }
 
     void maybe_unmap() {
+        if (fd_ >= 0 && array_) {
+            munmap((void*) array_, size_ * sizeof(T));
+            ftruncate(fd_, 0);
+        }
+        array_ = NULL;
+    }
+
+    void maybe_close() {
         if (fd_ >= 0) {
-            if (array_) {
-                munmap((void*) array_, size_ * sizeof(T));
-                array_ = NULL;
-            }
+            maybe_unmap();
             close(fd_);
             fd_ = -1;
         }
@@ -90,7 +95,7 @@ public:
 
     void freeze() {
         assert(!frozen_);
-        if (fd_ >= 0) {
+        if (fd_ >= 0 && size_ > 0) {
             flush();
             size_t len = sizeof(T) * size_;
             void* map = mmap(NULL, len, PROT_READ | PROT_WRITE,
@@ -104,6 +109,17 @@ public:
             array_ = &buffer_[0];
         }
         frozen_ = true;
+    }
+
+    void reset() {
+        assert(frozen_);
+        frozen_ = false;
+        if (fd_ >= 0) {
+            lseek(fd_, 0, SEEK_SET);
+        }
+        maybe_unmap();
+        size_ = 0;
+        buffer_.clear();
     }
 
 //private:

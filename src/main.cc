@@ -1100,7 +1100,7 @@ public:
     }
 
     void start_iteration() {
-        new_states_ = file_backed_mmap_array<St>();
+        new_states_.reset();
     }
 
     file_backed_mmap_array<St>& seen_states_mmap() {
