@@ -207,22 +207,23 @@ int search(St start_state, const Map& map) {
         for (auto& output : outputs) {
             MeasureTime<> timer(&dedup_s);
             output.flush();
-            file_backed_mmap_array<st_pair>& new_states =
-                output.new_states_mmap();
-            file_backed_mmap_array<st_pair>& seen_states =
-                output.seen_states_mmap();
+            auto& new_states = output.new_states_mmap();
+            auto& seen_states = output.seen_states_mmap();
+
+            total_states += new_states.size();
+            new_states_size += new_states.size();
+
             // Sort and dedup just new_states
             auto cmp = [](const st_pair& a, const st_pair &b) { return a < b;};
             sort_in_chunks(new_states.begin(), new_states.end(), cmp);
 
-            seen_states_size += seen_states.size();
-            new_states_size += new_states.size();
-            total_states += new_states.size();
             auto new_end = std::unique(new_states.begin(), new_states.end());
 
             // Build a new todo list from the entries in new_states not
             // contained in seen_states.
             dedup(&seen_states, &todo, new_states.begin(), new_end);
+
+            seen_states_size += seen_states.size();
             output.start_iteration();
         }
 
@@ -284,8 +285,7 @@ int search(St start_state, const Map& map) {
         while (!outputs.empty()) {
             auto& output = outputs.back();
             output.flush();
-            file_backed_mmap_array<st_pair>& seen_states =
-                output.seen_states_mmap();
+            auto& seen_states = output.seen_states_mmap();
             for (const auto& st : seen_states) {
                 outputs_by_depth[st.depth].insert(st);
             }
@@ -293,17 +293,10 @@ int search(St start_state, const Map& map) {
         }
         for (auto& output : outputs_by_depth) {
             output.flush();
-            file_backed_mmap_array<st_pair>& new_states =
-                output.new_states_mmap();
-            auto cmp = [](const st_pair& a, const st_pair &b) {
-                return a < b;
-            };
-            sort_in_chunks(new_states.begin(), new_states.end(), cmp);
         }
 
         for (int d = depth - 1; d >= 0; --d) {
-            file_backed_mmap_array<st_pair>& seen_states =
-                outputs_by_depth[d].new_states_mmap();
+            auto& seen_states = outputs_by_depth[d].new_states_mmap();
             for (const auto& pair : seen_states) {
                 St st(pair.a);
                 if (st.do_valid_moves(map,
