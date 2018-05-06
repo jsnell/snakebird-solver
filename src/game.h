@@ -324,17 +324,19 @@ public:
             int i = snake.i_;
             int id = snake_id(si);
             uint64_t tail = snake.tail_;
+            int segment = 0;
             for (int j = 0; j < snake.len_; ++j) {
                 if (j == 0 || !draw_path) {
                     obj_map_[i] = id;
                 } else {
-                    switch (tail & Snake::kDirMask) {
+                    switch (segment) {
                     case UP: obj_map_[i] = '^'; break;
                     case DOWN: obj_map_[i] = 'v'; break;
                     case LEFT: obj_map_[i] = '<'; break;
                     case RIGHT: obj_map_[i] = '>'; break;
                     }
                 }
+                segment = tail & Snake::kDirMask;
                 i -= Snake::apply_direction(tail & Snake::kDirMask);
                 tail >>= Snake::kDirBits;
             }
