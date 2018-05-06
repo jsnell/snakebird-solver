@@ -36,17 +36,19 @@ public:
         maybe_close();
     }
 
-    void maybe_unmap() {
+    void maybe_unmap(bool truncate) {
         if (fd_ >= 0 && array_) {
             munmap((void*) array_, size_ * sizeof(T));
-            ftruncate(fd_, 0);
+            if (truncate) {
+                ftruncate(fd_, 0);
+            }
         }
         array_ = NULL;
     }
 
     void maybe_close() {
         if (fd_ >= 0) {
-            maybe_unmap();
+            maybe_unmap(true);
             close(fd_);
             fd_ = -1;
         }
@@ -111,13 +113,19 @@ public:
         frozen_ = true;
     }
 
+    void thaw() {
+        assert(frozen_);
+        frozen_ = false;
+        maybe_unmap(false);
+    }
+
     void reset() {
         assert(frozen_);
         frozen_ = false;
         if (fd_ >= 0) {
             lseek(fd_, 0, SEEK_SET);
         }
-        maybe_unmap();
+        maybe_unmap(true);
         size_ = 0;
         buffer_.clear();
     }
