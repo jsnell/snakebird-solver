@@ -77,17 +77,35 @@ public:
     template<class P>
     uint64_t unpack(const P* packer, size_t at) {
         tail_ = 0;
-        at = packer->extract(tail_, kTailBits, at);
-        at = packer->extract(i_, kIndexBits, at);
-        at = packer->extract(len_, kLenBits, at);
+        if (packed_width() <= 64) {
+            uint64_t data;
+            at = packer->extract(data, packed_width(), at);
+            tail_ = data & ((1 << kTailBits) - 1);
+            data >>= kTailBits;
+            i_ = data & ((1 << kIndexBits) - 1);
+            data >>= kIndexBits;
+            len_ = data & ((1 << kLenBits) - 1);
+        } else {
+            at = packer->extract(tail_, kTailBits, at);
+            at = packer->extract(i_, kIndexBits, at);
+            at = packer->extract(len_, kLenBits, at);
+        }
         return at;
     }
 
     template<class P>
     uint64_t pack(P* packer, size_t at) const {
-        at = packer->deposit(tail_, kTailBits, at);
-        at = packer->deposit(i_, kIndexBits, at);
-        at = packer->deposit(len_, kLenBits, at);
+        if (packed_width() <= 64) {
+            at = packer->deposit(tail_ |
+                                 (i_ << kTailBits) |
+                                 (len_ << (kTailBits + kIndexBits)),
+                                 packed_width(),
+                                 at);
+        } else {
+            at = packer->deposit(tail_, kTailBits, at);
+            at = packer->deposit(i_, kIndexBits, at);
+            at = packer->deposit(len_, kLenBits, at);
+        }
         return at;
     }
 
