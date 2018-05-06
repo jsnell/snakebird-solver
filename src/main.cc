@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
@@ -127,6 +128,25 @@ public:
     file_backed_mmap_array<St> new_states_;
 };
 
+template<class Clock=typename std::chrono::high_resolution_clock>
+struct MeasureTime {
+    MeasureTime(double* target)
+        : target_(target),
+          start_(Clock::now()) {
+
+    }
+
+    ~MeasureTime() {
+        auto end = Clock::now();
+        // What a marvelous API.
+        auto duration = std::chrono::duration_cast<std::chrono::duration<double>>(end - start_);
+        *target_ += duration.count();
+    }
+
+    double* target_;
+    typename Clock::time_point start_;
+};
+
 template<class St, class Map>
 int search(St start_state, const Map& map) {
     using Packed = typename St::Packed;
@@ -177,6 +197,7 @@ int search(St start_state, const Map& map) {
 
     size_t total_states = 0;
     size_t depth = 0;
+    double dedup_s = 0, search_s = 0, print_s = 0;
     while (1) {
         // Empty the todo list
         todo.clear();
@@ -184,6 +205,7 @@ int search(St start_state, const Map& map) {
         size_t seen_states_size = 0;
         size_t new_states_size = 0;
         for (auto& output : outputs) {
+            MeasureTime<> timer(&dedup_s);
             output.flush();
             file_backed_mmap_array<st_pair>& new_states =
                 output.new_states_mmap();
@@ -204,15 +226,18 @@ int search(St start_state, const Map& map) {
             output.start_iteration();
         }
 
-        printf("depth: %ld unique:%ld new:%ld (total: %ld, delta %ld)\n",
+        printf("depth: %ld unique:%ld, delta %ld (total: %ld, delta %ld)\n",
                depth++,
                seen_states_size, todo.size(),
                total_states, new_states_size);
+        printf("timing: dedup: %lfs search: %lfs = total: %lfs\n",
+               dedup_s, search_s, dedup_s + search_s);
 
         if (win || todo.empty()) {
             break;
         }
 
+        MeasureTime<> timer(&search_s);
         for (auto packed : todo) {
             St st(packed);
 
@@ -247,6 +272,7 @@ int search(St start_state, const Map& map) {
            win ? "Win" : "No solution");
 
     if (win) {
+        MeasureTime<> timer(&print_s);
         win_state.print(map);
 
         Packed target(win_state);
@@ -300,6 +326,8 @@ int search(St start_state, const Map& map) {
     }
 
     printf("%ld states, %ld moves\n", steps, depth);
+    printf("timing: dedup: %lfs search: %lfs print: %lfs= total: %lfs\n",
+           dedup_s, search_s, print_s, dedup_s + search_s + print_s);
 
     return win ? depth - 1 : 0;
 }
