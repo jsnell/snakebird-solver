@@ -957,20 +957,29 @@ public:
         }
 
         bool operator==(const Packed& other) const {
-            // Bizarre, neither g++ or clang++ is inlining these
-            // memcmps despite the static length.
-            //
-            // return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) == 0;
-            for (int i = 0; i < P::Bytes; ++i) {
-                if (p_.bytes_[i] != other.p_.bytes_[i])
-                    return false;
-            }
-            return true;
+            return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) == 0;
         }
 
         bool operator<(const Packed& other) const {
+            // This is morally a memcmp, but it's opencoded since we
+            // don't care about what the ordering is, just that there
+            // is one. (The difference is due to endian issues).
+            //
             // return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) < 0;
-            for (int i = 0; i < P::Bytes; ++i) {
+            int i = 0;
+            for (; i + 7 < P::Bytes; i += 8) {
+                uint64_t a = *((uint64_t*) (p_.bytes_ + i));
+                uint64_t b = *((uint64_t*) (other.p_.bytes_ + i));
+                if (a != b)
+                    return a < b;
+            }
+            for (; i + 3 < P::Bytes; i += 4) {
+                uint32_t a = *((uint32_t*) (p_.bytes_ + i));
+                uint32_t b = *((uint32_t*) (other.p_.bytes_ + i));
+                if (a != b)
+                    return a < b;
+            }
+            for (; i < P::Bytes; ++i) {
                 if (p_.bytes_[i] != other.p_.bytes_[i])
                     return p_.bytes_[i] < other.p_.bytes_[i];
             }
