@@ -26,40 +26,31 @@
 
 template<class Seen, class Todo, class T>
 void dedup(Seen* seen_states, Todo* todo, T* new_begin, T* new_end) {
-    Seen new_seen_states;
-    auto new_it = new_begin;
-    auto seen_it = seen_states->begin();
-    while (true) {
-        bool have_new = new_it != new_end;
-        bool have_seen = seen_it != seen_states->end();
-        if (have_new && have_seen) {
-            const auto& new_front = new_it->a;
-            const auto& seen_front = seen_it->a;;
-            if (new_front < seen_front) {
-                todo->push_back(new_front);
-                new_seen_states.push_back(*new_it);
-                ++new_it;
-            } else if (new_front == seen_front) {
-                new_seen_states.push_back(*seen_it);
-                ++new_it;
-                ++seen_it;
-            } else {
-                new_seen_states.push_back(*seen_it);
-                ++seen_it;
+    if (seen_states->size()) {
+        auto it = new_begin;
+        T& prev = *(seen_states->begin());
+        for (const auto& st : *seen_states) {
+            if (st < prev) {
+                it = std::lower_bound(new_begin, new_end, st);
             }
-        } else if (have_new) {
-            todo->push_back(new_it->a);
-            new_seen_states.push_back(*new_it);
-            ++new_it;
-        } else if (have_seen) {
-            new_seen_states.push_back(*seen_it);
-            ++seen_it;
-        } else {
-            break;
+            while (it != new_end && *it < st) {
+                ++it;
+            }
+            if (st == *it) {
+                it->depth = 255;
+            }
+            prev = st;
         }
     }
-    // new_states->clear();
-    *seen_states = std::move(new_seen_states);
+
+    seen_states->thaw();
+
+    for (T* it = new_begin; it != new_end; ++it) {
+        if (it->depth != 255) {
+            seen_states->push_back(*it);
+            todo->push_back(it->a);
+        }
+    }
 }
 
 template<size_t chunk_bytes = 1000000000, class T, class Cmp>
