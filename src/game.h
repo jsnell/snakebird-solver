@@ -768,7 +768,11 @@ public:
         return true;
     }
 
-    bool process_gravity(const Map& map, uint32_t orig_tele_mask) {
+    bool process_gravity(const Map& map, uint32_t orig_tele_mask)
+        __attribute__((noinline)) {
+        uint32_t recompute_falling = (1 << (SnakeCount + GadgetCount)) - 1;
+        uint32_t falling[SnakeCount + GadgetCount];
+
     again:
         // FIXME. Figure out if exits and teleporters have different
         // priority. Is it possible to construct a case where that
@@ -794,29 +798,61 @@ public:
         }
         orig_tele_mask = new_tele_mask;
 
+        uint32_t supported = 0;
         for (int si = 0; si < SnakeCount; ++si) {
+            int mask = 0;
             if (snakes_[si].len_) {
-                int falling = is_snake_falling(map, obj_map, si);
-                if (falling) {
-                    do_pushes(obj_map, falling, W);
-                    if (destroy_if_intersects_hazard(map, obj_map, falling))
-                        return false;
-                    goto again;
+                if (recompute_falling &
+                    snake_mask(si)) {
+                    mask = is_snake_falling(map, obj_map, si);
                 }
+            }
+            falling[si] = mask;
+            if (!mask) {
+                supported |= snake_mask(si);
+            }
+        }
+        for (int gi = 0; gi < GadgetCount; ++gi) {
+            int offset = gadgets_[gi].offset_;
+            int mask = 0;
+            if (offset != kGadgetDeleted) {
+                if (recompute_falling &
+                    gadget_mask(gi)) {
+                    mask = is_gadget_falling(map, obj_map, gi);
+                }
+            }
+            falling[SnakeCount + gi] = mask;
+            if (!mask) {
+                supported |= gadget_mask(gi);
+            }
+        }
+        recompute_falling = 0;
+
+        while (1) {
+            bool again = false;
+            for (int i = 0; i < (SnakeCount + GadgetCount); ++i) {
+                int mask = (1 << i);
+                if (!(supported & mask) &&
+                    (supported & falling[i])) {
+                    supported |= mask;
+                    again = true;
+                }
+            }
+            if (!again) {
+                break;
             }
         }
 
-        for (int i = 0; i < GadgetCount; ++i) {
-            int offset = gadgets_[i].offset_;
-            if (offset != kGadgetDeleted) {
-                int falling = is_gadget_falling(map, obj_map, i);
-                if (falling) {
-                    do_pushes(obj_map, falling, W);
-                    if (destroy_if_intersects_hazard(map, obj_map, falling))
-                        return false;
-                    goto again;
-                }
+        uint32_t to_push = ((1 << (SnakeCount + GadgetCount)) - 1)
+            & ~supported;
+
+        if (to_push) {
+            do_pushes(obj_map, to_push, W);
+            if (destroy_if_intersects_hazard(map, obj_map, to_push)) {
+                return false;
             }
+            recompute_falling |= to_push;
+            goto again;
         }
 
         return true;
@@ -859,19 +895,12 @@ public:
 
         uint64_t tail = snake.tail_;
         for (int j = 0; j < snake.len_; ++j) {
-            if (map[below] == '.') {
+            if (map[below] == '.' ||
+                obj_map.fruit_at(below)) {
                 return 0;
             }
             if (obj_map.foreign_object_at(below, snake_id(si))) {
-                int new_pushed_ids = 0;
-                if (is_valid_push(map, obj_map,
-                                  snake_id(si),
-                                  below - W, W,
-                                  &new_pushed_ids)) {
-                    pushed_ids |= new_pushed_ids;
-                } else {
-                    return 0;
-                }
+                pushed_ids |= obj_map.mask_at(below);
             }
 
             below -= Snake::apply_direction(tail & Snake::kDirMask);
@@ -892,19 +921,13 @@ public:
         for (int j = 0; j < gadget.size_; ++j) {
             int at = gadget.i_[j] + gadgets_[gadget_index].offset_;
             int below = at + W;
-            if (map[below] == '.') {
-                return 0;
-            }
-            if (map[below] == '#') {
+            if (map[below] == '.' ||
+                map[below] == '#' ||
+                obj_map.fruit_at(below)) {
                 return 0;
             }
             if (obj_map.foreign_object_at(below, id)) {
-                int new_pushed_ids = 0;
-                if (is_valid_push(map, obj_map, id, at, W, &new_pushed_ids)) {
-                    pushed_ids |= new_pushed_ids;
-                } else {
-                    return 0;
-                }
+                pushed_ids |= obj_map.mask_at(below);
             }
         }
 
