@@ -80,11 +80,11 @@ public:
         if (packed_width() <= 64) {
             uint64_t data;
             at = packer->extract(data, packed_width(), at);
-            tail_ = data & ((1 << kTailBits) - 1);
+            tail_ = data & ((UINT64_C(1) << kTailBits) - 1);
             data >>= kTailBits;
-            i_ = data & ((1 << kIndexBits) - 1);
+            i_ = data & ((UINT64_C(1) << kIndexBits) - 1);
             data >>= kIndexBits;
-            len_ = data & ((1 << kLenBits) - 1);
+            len_ = data & ((UINT64_C(1) << kLenBits) - 1);
         } else {
             at = packer->extract(tail_, kTailBits, at);
             at = packer->extract(i_, kIndexBits, at);
@@ -97,8 +97,8 @@ public:
     uint64_t pack(P* packer, size_t at) const {
         if (packed_width() <= 64) {
             at = packer->deposit(tail_ |
-                                 (i_ << kTailBits) |
-                                 (len_ << (kTailBits + kIndexBits)),
+                                 ((uint64_t) i_ << kTailBits) |
+                                 ((uint64_t) len_ << (kTailBits + kIndexBits)),
                                  packed_width(),
                                  at);
         } else {
