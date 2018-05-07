@@ -92,6 +92,7 @@ public:
     OutputState(OutputState&& other)
         :  seen_states_(std::move(other.seen_states_)),
            new_states_(std::move(other.new_states_)) {
+        seen_states_round_start_.push_back(0);
     }
 
     void insert(St st) {
@@ -99,12 +100,22 @@ public:
     }
 
     void flush() {
+        seen_states_round_start_.push_back(seen_states_.size());
         seen_states_.freeze();
         new_states_.freeze();
     }
 
     void start_iteration() {
         new_states_.reset();
+        seen_states_round_end_.push_back(seen_states_.size());
+    }
+
+    St* round_begin(int round) {
+        return seen_states_.begin() + seen_states_round_start_[round];
+    }
+
+    St* round_end(int round) {
+        return seen_states_.begin() + seen_states_round_end_[round];
     }
 
     file_backed_mmap_array<St>& seen_states_mmap() {
@@ -115,8 +126,11 @@ public:
         return new_states_;
     }
 
+
     file_backed_mmap_array<St> seen_states_;
     file_backed_mmap_array<St> new_states_;
+    std::vector<size_t> seen_states_round_start_;
+    std::vector<size_t> seen_states_round_end_;
 };
 
 template<class Clock=typename std::chrono::high_resolution_clock>
@@ -186,16 +200,17 @@ int search(St start_state, const Map& map) {
     st_pair win_state = st_pair(null_state, 0);
     bool win = false;
 
-    {
-        Packed p(start_state);
-        St s(p);
-        s.print(map);
-    }
-
     std::vector<OutputState<st_pair>> outputs;
     int shard_mask = reshard<st_pair>(&outputs, 16);
 
-    outputs[0].insert(st_pair(start_state, 0));
+    {
+        auto pair = st_pair(start_state, 0);
+        auto hash = CityHash64((char*) pair.a.p_.bytes_,
+                               sizeof(pair.a.p_.bytes_));
+        pair.parent_hash = hash & shard_mask;
+        outputs[hash & shard_mask].insert(pair);
+        St(pair.a).print(map);
+    }
 
     size_t total_states = 0;
     size_t depth = 0;
@@ -261,8 +276,8 @@ int search(St start_state, const Map& map) {
                                   st_pair pair(new_state, 0);
                                   auto hash = CityHash64((char*) pair.a.p_.bytes_,
                                                          sizeof(pair.a.p_.bytes_));
-                                  pair.parent_hash = parent_hash & 0x7f;
-                                  outputs[(hash >> 8) & shard_mask].insert(pair);
+                                  pair.parent_hash = parent_hash;
+                                  outputs[hash & shard_mask].insert(pair);
                                   // new_states.push_back(
                                   //     st_pair(new_state, depth));
                                   if (new_state.win()) {
@@ -284,30 +299,17 @@ int search(St start_state, const Map& map) {
 
         st_pair target = win_state;
 
-        std::vector<OutputState<st_pair>> outputs_by_hash;
-        for (int i = 0; i < 0x80; ++i) {
-            outputs_by_hash.emplace_back(OutputState<st_pair>(i));
-        }
-        while (!outputs.empty()) {
-            auto& output = outputs.back();
-            output.flush();
-            auto& seen_states = output.seen_states_mmap();
-            for (const auto& st : seen_states) {
-                auto hash = CityHash64((char*) st.a.p_.bytes_,
-                                       sizeof(st.a.p_.bytes_));
-                outputs_by_hash[hash & 0x7f].insert(st);
-            }
-            outputs.pop_back();
-        }
-        for (auto& output : outputs_by_hash) {
+        for (auto& output : outputs) {
             output.flush();
         }
 
-        for (int i = 0; i < depth; ++i) {
-            auto h = target.parent_hash;
-            auto& seen_states = outputs_by_hash[h].new_states_mmap();
-            for (const auto& pair : seen_states) {
-                St st(pair.a);
+        for (int i = depth - 1; i > 0; --i) {
+            auto h = target.parent_hash & shard_mask;
+            const auto begin = outputs[h].round_begin(i);
+            const auto end = outputs[h].round_end(i);
+            printf("Move %d\n", i);
+            for (auto it = begin; it != end + 10; ++it) {
+                St st(it->a);
                 if (st.do_valid_moves(map,
                                       [&target, &map](St new_state,
                                                       int si,
@@ -320,7 +322,7 @@ int search(St start_state, const Map& map) {
                                           return false;
                                       })) {
                     st.print(map);
-                    target = pair;
+                    target = *it;
                     break;
                 }
             }
