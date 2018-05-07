@@ -28,7 +28,7 @@ template<class Seen, class Todo, class T>
 void dedup(Seen* seen_states, Todo* todo, T* new_begin, T* new_end) {
     if (seen_states->size()) {
         auto it = new_begin;
-        T& prev = *(seen_states->begin());
+        auto prev = *seen_states->begin();
         for (const auto& st : *seen_states) {
             if (st < prev) {
                 it = std::lower_bound(new_begin, new_end, st);
