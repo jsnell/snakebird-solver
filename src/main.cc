@@ -37,7 +37,7 @@ void dedup(Seen* seen_states, Todo* todo, T* new_begin, T* new_end) {
                 ++it;
             }
             if (st == *it) {
-                it->depth = 255;
+                it->parent_hash = 255;
             }
             prev = st;
         }
@@ -46,7 +46,7 @@ void dedup(Seen* seen_states, Todo* todo, T* new_begin, T* new_end) {
     seen_states->thaw();
 
     for (T* it = new_begin; it != new_end; ++it) {
-        if (it->depth != 255) {
+        if (it->parent_hash != 255) {
             seen_states->push_back(*it);
             todo->push_back(it->a);
         }
@@ -138,6 +138,19 @@ struct MeasureTime {
     typename Clock::time_point start_;
 };
 
+template<class T>
+int reshard(std::vector<OutputState<T>>* outputs,
+             int new_shards) {
+    assert(outputs->empty());
+    assert(!(new_shards & (new_shards - 1)));
+
+    for (int i = 0; i < new_shards; ++i) {
+        outputs->emplace_back(OutputState<T>(i));
+    }
+
+    return new_shards - 1;
+}
+
 template<class St, class Map>
 int search(St start_state, const Map& map) {
     using Packed = typename St::Packed;
@@ -150,7 +163,8 @@ int search(St start_state, const Map& map) {
         st_pair() {
         }
 
-        st_pair(const St& a, uint8_t depth) : a(a), depth(depth) {
+        st_pair(const St& a, uint8_t parent_hash)
+            : a(a), parent_hash(parent_hash) {
         }
 
         bool operator<(const st_pair& other) const {
@@ -161,7 +175,7 @@ int search(St start_state, const Map& map) {
         }
 
         Packed a;
-        uint8_t depth = 0;
+        uint8_t parent_hash = 0;
     };
     printf("bits=%ld packed_bytes=%ld\n", St::packed_width(),
            sizeof(Packed));
@@ -169,7 +183,7 @@ int search(St start_state, const Map& map) {
     // BFS state
     std::vector<Packed> todo;
     size_t steps = 0;
-    St win_state = null_state;
+    st_pair win_state = st_pair(null_state, 0);
     bool win = false;
 
     {
@@ -179,10 +193,7 @@ int search(St start_state, const Map& map) {
     }
 
     std::vector<OutputState<st_pair>> outputs;
-    const int kShards = (1 << 4);
-    for (int i = 0; i < kShards; ++i) {
-        outputs.emplace_back(OutputState<st_pair>(i));
-    }
+    int shard_mask = reshard<st_pair>(&outputs, 16);
 
     outputs[0].insert(st_pair(start_state, 0));
 
@@ -237,21 +248,25 @@ int search(St start_state, const Map& map) {
                 printf(".");
                 fflush(stdout);
             }
+            auto parent_hash = CityHash64((char*) packed.p_.bytes_,
+                                          sizeof(packed.p_.bytes_));
 
             st.do_valid_moves(map,
-                              [&depth, &outputs, &win, &map,
+                              [&depth, &outputs, &win, &map, &parent_hash,
+                               &shard_mask,
                                &win_state](St new_state,
                                            int si,
                                            Direction dir) {
                                   new_state.canonicalize(map);
-                                  st_pair pair(new_state, depth);
+                                  st_pair pair(new_state, 0);
                                   auto hash = CityHash64((char*) pair.a.p_.bytes_,
                                                          sizeof(pair.a.p_.bytes_));
-                                  outputs[hash & (kShards - 1)].insert(pair);
+                                  pair.parent_hash = parent_hash & 0x7f;
+                                  outputs[(hash >> 8) & shard_mask].insert(pair);
                                   // new_states.push_back(
                                   //     st_pair(new_state, depth));
                                   if (new_state.win()) {
-                                      win_state = new_state;
+                                      win_state = pair;
                                       win = true;
                                       return true;
                                   }
@@ -265,29 +280,32 @@ int search(St start_state, const Map& map) {
 
     if (win) {
         MeasureTime<> timer(&print_s);
-        win_state.print(map);
+        St(win_state.a).print(map);
 
-        Packed target(win_state);
+        st_pair target = win_state;
 
-        std::vector<OutputState<st_pair>> outputs_by_depth;
-        for (int i = 0; i < depth; ++i) {
-            outputs_by_depth.emplace_back(OutputState<st_pair>(i));
+        std::vector<OutputState<st_pair>> outputs_by_hash;
+        for (int i = 0; i < 0x80; ++i) {
+            outputs_by_hash.emplace_back(OutputState<st_pair>(i));
         }
         while (!outputs.empty()) {
             auto& output = outputs.back();
             output.flush();
             auto& seen_states = output.seen_states_mmap();
             for (const auto& st : seen_states) {
-                outputs_by_depth[st.depth].insert(st);
+                auto hash = CityHash64((char*) st.a.p_.bytes_,
+                                       sizeof(st.a.p_.bytes_));
+                outputs_by_hash[hash & 0x7f].insert(st);
             }
             outputs.pop_back();
         }
-        for (auto& output : outputs_by_depth) {
+        for (auto& output : outputs_by_hash) {
             output.flush();
         }
 
-        for (int d = depth - 1; d >= 0; --d) {
-            auto& seen_states = outputs_by_depth[d].new_states_mmap();
+        for (int i = 0; i < depth; ++i) {
+            auto h = target.parent_hash;
+            auto& seen_states = outputs_by_hash[h].new_states_mmap();
             for (const auto& pair : seen_states) {
                 St st(pair.a);
                 if (st.do_valid_moves(map,
@@ -296,13 +314,13 @@ int search(St start_state, const Map& map) {
                                                       Direction dir) {
                                           new_state.canonicalize(map);
                                           Packed p(new_state);
-                                          if (p == target) {
+                                          if (p == target.a) {
                                               return true;
                                           }
                                           return false;
                                       })) {
                     st.print(map);
-                    target = st;
+                    target = pair;
                     break;
                 }
             }
