@@ -70,7 +70,7 @@ public:
         }
     }
 
-    bool empty() const { return size_ > 0; }
+    bool empty() const { return size_ == 0; }
 
     T* begin() {
         assert(frozen_);
