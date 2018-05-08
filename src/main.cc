@@ -80,7 +80,9 @@ void sort_in_chunks(T* start, T* end, Cmp cmp) {
     }
 }
 
-template<class St>
+template<class St,
+         // 200M
+         size_t kMemoryTargetBytes=200000000>
 class OutputState {
 public:
     explicit OutputState(int i) {
@@ -118,17 +120,20 @@ public:
         return seen_states_.begin() + seen_states_round_end_[round];
     }
 
-    file_backed_mmap_array<St>& seen_states_mmap() {
+    using SeenStates = file_backed_mmap_array<St, kMemoryTargetBytes/2>;
+    using NewStates = file_backed_mmap_array<St, kMemoryTargetBytes/2>;
+
+    SeenStates& seen_states_mmap() {
         return seen_states_;
     }
 
-    file_backed_mmap_array<St>& new_states_mmap() {
+    NewStates& new_states_mmap() {
         return new_states_;
     }
 
 
-    file_backed_mmap_array<St> seen_states_;
-    file_backed_mmap_array<St> new_states_;
+    SeenStates seen_states_;
+    NewStates new_states_;
     std::vector<size_t> seen_states_round_start_;
     std::vector<size_t> seen_states_round_end_;
 };
@@ -152,14 +157,14 @@ struct MeasureTime {
     typename Clock::time_point start_;
 };
 
-template<class T>
-int reshard(std::vector<OutputState<T>>* outputs,
+template<class T, size_t SZ>
+int reshard(std::vector<OutputState<T, SZ>>* outputs,
              int new_shards) {
     assert(outputs->empty());
     assert(!(new_shards & (new_shards - 1)));
 
     for (int i = 0; i < new_shards; ++i) {
-        outputs->emplace_back(OutputState<T>(i));
+        outputs->emplace_back(OutputState<T, SZ>(i));
     }
 
     return new_shards - 1;
@@ -191,8 +196,6 @@ int search(St start_state, const Map& map) {
         Packed a;
         uint8_t parent_hash = 0;
     };
-    printf("bits=%ld packed_bytes=%ld\n", St::packed_width(),
-           sizeof(Packed));
 
     // BFS state
     std::vector<Packed> todo;
@@ -200,8 +203,15 @@ int search(St start_state, const Map& map) {
     st_pair win_state = st_pair(null_state, 0);
     bool win = false;
 
-    std::vector<OutputState<st_pair>> outputs;
-    int shard_mask = reshard<st_pair>(&outputs, 16);
+    const size_t kTargetMemoryBytes = 3UL * 1024 * 1024 * 1024;
+    const int kShards = 16;
+    std::vector<OutputState<st_pair, kTargetMemoryBytes / kShards>> outputs;
+    int shard_mask = reshard<st_pair>(&outputs, kShards);
+
+    printf("bits=%ld packed_bytes=%ld output_state=%ldMB\n",
+           St::packed_width(),
+           sizeof(Packed),
+           kTargetMemoryBytes / kShards / 1000 / 1000);
 
     {
         auto pair = st_pair(start_state, 0);

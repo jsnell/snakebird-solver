@@ -3,7 +3,9 @@
 #ifndef FILE_BACKED_ARRAY_H
 #define FILE_BACKED_ARRAY_H
 
-template<class T, size_t kFlushThreshold = 1000000>
+template<class T,
+         // 100M
+         size_t kFlushThresholdBytes = 100000000>
 class file_backed_mmap_array {
 public:
     file_backed_mmap_array() {
@@ -85,7 +87,7 @@ public:
     void push_back(const T& data) {
         assert(!frozen_);
         buffer_.push_back(data);
-        if (buffer_.size() > kFlushThreshold) {
+        if (buffer_.size() * sizeof(T) > kFlushThresholdBytes) {
             if (fd_ == -1) {
                 open();
             }
@@ -130,7 +132,7 @@ public:
         buffer_.clear();
     }
 
-//private:
+private:
     std::vector<T> buffer_;
     bool frozen_ = false;
     size_t size_ = 0;
