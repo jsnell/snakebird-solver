@@ -224,7 +224,8 @@ int search(St start_state, const Map& map) {
 
     size_t total_states = 0;
     size_t depth = 0;
-    double dedup_s = 0, search_s = 0, print_s = 0;
+    double dedup_sort_s = 0, dedup_merge_s = 0,
+        search_s = 0, print_s = 0;
     while (1) {
         // Empty the todo list
         todo.clear();
@@ -232,7 +233,6 @@ int search(St start_state, const Map& map) {
         size_t seen_states_size = 0;
         size_t new_states_size = 0;
         for (auto& output : outputs) {
-            MeasureTime<> timer(&dedup_s);
             output.flush();
             auto& new_states = output.new_states_mmap();
             auto& seen_states = output.seen_states_mmap();
@@ -240,14 +240,19 @@ int search(St start_state, const Map& map) {
             total_states += new_states.size();
             new_states_size += new_states.size();
 
-            // Sort and dedup just new_states
-            auto cmp = [](const st_pair& a, const st_pair &b) { return a < b;};
-            sort_in_chunks(new_states.begin(), new_states.end(), cmp);
+            st_pair* new_end = NULL;
+            {
+                // Sort and dedup just new_states
+                MeasureTime<> timer(&dedup_sort_s);
+                auto cmp = [](const st_pair& a, const st_pair &b) { return a < b;};
+                sort_in_chunks(new_states.begin(), new_states.end(), cmp);
 
-            auto new_end = std::unique(new_states.begin(), new_states.end());
+                new_end = std::unique(new_states.begin(), new_states.end());
+            }
 
             // Build a new todo list from the entries in new_states not
             // contained in seen_states.
+            MeasureTime<> timer(&dedup_merge_s);
             dedup(&seen_states, &todo, new_states.begin(), new_end);
 
             seen_states_size += seen_states.size();
@@ -258,8 +263,9 @@ int search(St start_state, const Map& map) {
                depth++,
                seen_states_size, todo.size(),
                total_states, new_states_size);
-        printf("timing: dedup: %lfs search: %lfs = total: %lfs\n",
-               dedup_s, search_s, dedup_s + search_s);
+        printf("timing: dedup: %lfs+%lfs search: %lfs = total: %lfs\n",
+               dedup_sort_s, dedup_merge_s, search_s,
+               dedup_sort_s + dedup_merge_s + search_s);
 
         if (win || todo.empty()) {
             break;
@@ -269,7 +275,7 @@ int search(St start_state, const Map& map) {
         for (auto packed : todo) {
             St st(packed);
 
-            if (!(++steps & 0xffff)) {
+            if (!(++steps & 0x7ffff)) {
                 printf(".");
                 fflush(stdout);
             }
@@ -341,7 +347,8 @@ int search(St start_state, const Map& map) {
 
     printf("%ld states, %ld moves\n", steps, depth);
     printf("timing: dedup: %lfs search: %lfs print: %lfs= total: %lfs\n",
-           dedup_s, search_s, print_s, dedup_s + search_s + print_s);
+           dedup_sort_s + dedup_merge_s, search_s, print_s,
+           dedup_sort_s + dedup_merge_s + search_s + print_s);
 
     return win ? depth - 1 : 0;
 }
