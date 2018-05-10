@@ -3,18 +3,10 @@
 #ifndef GAME_H
 #define GAME_H
 
+#include "util.h"
+
 enum Direction {
     UP, RIGHT, DOWN, LEFT,
-};
-
-template<uint64_t I>
-struct integer_length {
-    enum { value = 1 + integer_length<I/2>::value, };
-};
-
-template<>
-struct integer_length<1> {
-    enum { value = 1 };
 };
 
 template<int H, int W, int MaxLen>
