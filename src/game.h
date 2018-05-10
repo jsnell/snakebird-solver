@@ -313,17 +313,17 @@ public:
             for (int si = 0; si < SnakeCount; ++si) {
                 draw_snake(st, si, draw_path);
             }
-            for (int i = 0; i < FruitCount; ++i) {
-                if (st.fruit_active(i)) {
-                    obj_map_[map.fruit_[i]] = fruit_id();
+            for (int fi = 0; fi < FruitCount; ++fi) {
+                if (st.fruit_active(fi)) {
+                    obj_map_[map.fruit_[fi]] = fruit_id();
                 }
             }
-            for (int i = 0; i < GadgetCount; ++i) {
-                int offset = st.gadgets_[i].offset_;
+            for (int gi = 0; gi < GadgetCount; ++gi) {
+                int offset = st.gadgets_[gi].offset_;
                 if (offset != kGadgetDeleted) {
-                    const auto& gadget = map.gadgets_[i];
+                    const auto& gadget = map.gadgets_[gi];
                     for (int j = 0; j < gadget.size_; ++j) {
-                        obj_map_[offset + gadget.i_[j]] = gadget_id(i);
+                        obj_map_[offset + gadget.i_[j]] = gadget_id(gi);
                     }
                 }
             }
@@ -368,18 +368,18 @@ public:
 
     State() {
         fruit_ = (1 << FruitCount) - 1;
-        for (int i = 0; i < GadgetCount; ++i) {
-            gadgets_[i].template_ = i;
+        for (int gi = 0; gi < GadgetCount; ++gi) {
+            gadgets_[gi].template_ = gi;
         }
     }
 
     State(const Map& map) : State() {
-        for (int i = 0; i < SnakeCount; ++i) {
-            snakes_[i] = map.snakes_[i];
+        for (int si = 0; si < SnakeCount; ++si) {
+            snakes_[si] = map.snakes_[si];
         }
-        for (int i = 0; i < GadgetCount; ++i) {
-            gadgets_[i].offset_ = map.gadgets_[i].initial_offset_;
-            gadgets_[i].template_ = i;
+        for (int gi = 0; gi < GadgetCount; ++gi) {
+            gadgets_[gi].offset_ = map.gadgets_[gi].initial_offset_;
+            gadgets_[gi].template_ = gi;
         }
     }
 
@@ -512,11 +512,11 @@ public:
     uint32_t teleporter_overlap(const Map& map, const ObjMap<>& objmap) const {
         uint32_t mask = 0;
         const uint32_t width = SnakeCount + GadgetCount;
-        for (int i = 0; i < TeleporterCount; ++i) {
+        for (int ti = 0; ti < TeleporterCount; ++ti) {
             mask |=
-                ((objmap.mask_at(map.teleporters_[i].first)) |
-                 (objmap.mask_at(map.teleporters_[i].second) << width))
-                << (width * 2 * i);
+                ((objmap.mask_at(map.teleporters_[ti].first)) |
+                 (objmap.mask_at(map.teleporters_[ti].second) << width))
+                << (width * 2 * ti);
         }
         return mask;
     }
@@ -527,9 +527,9 @@ public:
                 snakes_[si].translate(push_delta);
             }
         }
-        for (int i = 0; i < GadgetCount; ++i) {
-            if (pushed_ids & gadget_mask(i)) {
-                gadgets_[i].offset_ += push_delta;
+        for (int gi = 0; gi < GadgetCount; ++gi) {
+            if (pushed_ids & gadget_mask(gi)) {
+                gadgets_[gi].offset_ += push_delta;
             }
         }
     }
@@ -543,10 +543,10 @@ public:
                     return true;
             }
         }
-        for (int i = 0; i < GadgetCount; ++i) {
-            if (pushed_ids & gadget_mask(i)) {
-                if (gadget_intersects_hazard(map, i)) {
-                    gadgets_[i].offset_ = kGadgetDeleted;
+        for (int gi = 0; gi < GadgetCount; ++gi) {
+            if (pushed_ids & gadget_mask(gi)) {
+                if (gadget_intersects_hazard(map, gi)) {
+                    gadgets_[gi].offset_ = kGadgetDeleted;
                 }
             }
         }
@@ -556,11 +556,11 @@ public:
     bool is_valid_grow(const Map& map,
                        int to,
                        int* fruit_index) const {
-        for (int i = 0; i < FruitCount; ++i) {
-            int fruit = map.fruit_[i];
-            if (fruit_active(i) &&
+        for (int fi = 0; fi < FruitCount; ++fi) {
+            int fruit = map.fruit_[fi];
+            if (fruit_active(fi) &&
                 fruit == to) {
-                *fruit_index = i;
+                *fruit_index = fi;
                 return true;
             }
         }
@@ -616,12 +616,12 @@ public:
                     }
                 }
             }
-            for (int i = 0; i < GadgetCount; ++i) {
-                if (*pushed_ids & gadget_mask(i)) {
+            for (int gi = 0; gi < GadgetCount; ++gi) {
+                if (*pushed_ids & gadget_mask(gi)) {
                     int new_pushed_ids = 0;
                     if (!gadget_can_be_pushed(map,
                                               obj_map,
-                                              i,
+                                              gi,
                                               delta,
                                               &new_pushed_ids)) {
                         return false;
@@ -663,11 +663,11 @@ public:
 
     bool gadget_can_be_pushed(const Map& map,
                               const ObjMap<>& obj_map,
-                              int gadget_index,
+                              int gi,
                               int delta,
                               int* pushed_ids) const __attribute__((noinline)) {
-        const auto& gadget = map.gadgets_[gadget_index];
-        int offset = gadgets_[gadget_index].offset_;
+        const auto& gadget = map.gadgets_[gi];
+        int offset = gadgets_[gi].offset_;
 
         for (int j = 0; j < gadget.size_; ++j) {
             int i = gadget.i_[j] + offset + delta;
@@ -697,9 +697,9 @@ public:
         // with two different teleporter pairs being triggered at the
         // same time, so it's just a guess that this is how they'd
         // work.
-        for (int i = 0; i < TeleporterCount; ++i) {
-            int delta = map.teleporters_[i].second -
-                map.teleporters_[i].first;
+        for (int ti = 0; ti < TeleporterCount; ++ti) {
+            int delta = map.teleporters_[ti].second -
+                map.teleporters_[ti].first;
             for (int dir = 0; dir < 2; ++dir) {
                 for (int si = 0; si < SnakeCount; ++si) {
                     if (test & only_new) {
@@ -916,14 +916,14 @@ public:
 
     int is_gadget_falling(const Map& map,
                           const ObjMap<>& obj_map,
-                          int gadget_index) const {
-        const auto& gadget = map.gadgets_[gadget_index];
+                          int gi) const {
+        const auto& gadget = map.gadgets_[gi];
 
-        int pushed_ids = gadget_mask(gadget_index);
-        int id = gadget_id(gadget_index);
+        int pushed_ids = gadget_mask(gi);
+        int id = gadget_id(gi);
 
         for (int j = 0; j < gadget.size_; ++j) {
-            int at = gadget.i_[j] + gadgets_[gadget_index].offset_;
+            int at = gadget.i_[j] + gadgets_[gi].offset_;
             int below = at + W;
             if (map[below] == '.' ||
                 map[below] == '#' ||
@@ -954,11 +954,11 @@ public:
     }
 
     bool gadget_intersects_hazard(const Map& map,
-                                  int gadget_index) const {
-        int offset = gadgets_[gadget_index].offset_;
+                                  int gi) const {
+        int offset = gadgets_[gi].offset_;
         if (offset == kGadgetDeleted)
             return false;
-        const auto& gadget = map.gadgets_[gadget_index];
+        const auto& gadget = map.gadgets_[gi];
         for (int j = 0; j < gadget.size_; ++j) {
             // Spikes aren't a hazard for gadgets.
             if (map[gadget.i_[j] + offset] == '~')
