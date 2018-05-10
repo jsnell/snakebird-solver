@@ -398,6 +398,7 @@ int search(St start_state, const Map& map) {
 #include "levelstar4.h"
 #include "levelstar5.h"
 #include "levelstar6.h"
+#include "levelvoid.h"
 
 int main() {
 #define EXPECT_EQ(wanted, actual)                                       \
@@ -454,12 +455,13 @@ int main() {
     EXPECT_EQ(36, level_43());
     EXPECT_EQ(36, level_44());
     EXPECT_EQ(77, level_45());
-    EXPECT_EQ(75, level_star1());     // 9GB, 30 minutes
+    EXPECT_EQ(75, level_star1());   // 5GB, 20 minutes
     EXPECT_EQ(60, level_star2());
     EXPECT_EQ(63, level_star3());   // 2.2GB
     EXPECT_EQ(44, level_star4());
     EXPECT_EQ(69, level_star5());
-    EXPECT_EQ(75, level_star6());   // 12GB, 40 minutes
+    EXPECT_EQ(90, level_star6());   // 40GB, 10 hours
+    EXPECT_EQ(52, level_void());
 
 
     return 0;
