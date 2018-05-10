@@ -26,24 +26,27 @@ public:
     static const int kIndexBits = integer_length<H * W>::value;
     static const int kLenBits = integer_length<MaxLen>::value;
 
-    Snake() : tail_(0), i_(0), len_(0) {
+    Snake() : tail_(0), len_(0) {
+        i_[0] = 0;
     }
 
     Snake(int i)
         : tail_(0),
-          i_(i),
           len_(1) {
-        assert(i_ < H * W);
+        assert(i < H * W);
+        i_[0] = i;
     }
 
     void grow(Direction dir) {
-        i_ += apply_direction(dir);
+        std::copy(&i_[0], &i_[len_], &i_[1]);
+        i_[0] = i_[1] + apply_direction(dir);
         ++len_;
         tail_ = (tail_ << kDirBits) | dir;
     }
 
     void move(Direction dir) {
-        i_ += apply_direction(dir);
+        std::copy_backward(&i_[0], &i_[len_ - 1], &i_[len_]);
+        i_[0] = i_[1] + apply_direction(dir);
         tail_ &= ~(kDirMask << ((len_ - 2) * kDirBits));
         tail_ = (tail_ << kDirBits) | dir;
     }
@@ -62,8 +65,9 @@ public:
     }
 
     bool operator<(const Snake& other) const {
-        if (i_ != other.i_) {
-            return i_ < other.i_;
+        // Doesn't matter which position gets compared.
+        if (i_[0] != other.i_[0]) {
+            return i_[0] < other.i_[0];
         }
         if (len_ != other.len_) {
             return len_ < other.len_;
@@ -82,14 +86,15 @@ public:
             at = packer->extract(data, packed_width(), at);
             tail_ = data & ((UINT64_C(1) << kTailBits) - 1);
             data >>= kTailBits;
-            i_ = data & ((UINT64_C(1) << kIndexBits) - 1);
+            i_[0] = data & ((UINT64_C(1) << kIndexBits) - 1);
             data >>= kIndexBits;
             len_ = data & ((UINT64_C(1) << kLenBits) - 1);
         } else {
             at = packer->extract(tail_, kTailBits, at);
-            at = packer->extract(i_, kIndexBits, at);
+            at = packer->extract(i_[0], kIndexBits, at);
             at = packer->extract(len_, kLenBits, at);
         }
+        init_locations_from_tail();
         return at;
     }
 
@@ -97,13 +102,13 @@ public:
     uint64_t pack(P* packer, size_t at) const {
         if (packed_width() <= 64) {
             at = packer->deposit(tail_ |
-                                 ((uint64_t) i_ << kTailBits) |
+                                 ((uint64_t) i_[0] << kTailBits) |
                                  ((uint64_t) len_ << (kTailBits + kIndexBits)),
                                  packed_width(),
                                  at);
         } else {
             at = packer->deposit(tail_, kTailBits, at);
-            at = packer->deposit(i_, kIndexBits, at);
+            at = packer->deposit(i_[0], kIndexBits, at);
             at = packer->deposit(len_, kLenBits, at);
         }
         return at;
@@ -113,8 +118,20 @@ public:
         return kTailBits + kIndexBits + kLenBits;
     }
 
+    void init_locations_from_tail() {
+        for (int i = 1; i < len_; ++i) {
+            i_[i] = i_[i - 1] - apply_direction(tail(i - 1));
+        }
+    }
+
+    void translate(int32_t delta) {
+        for (int i = 0; i < len_; ++i) {
+            i_[i] += delta;
+        }
+    }
+
     uint64_t tail_;
-    int32_t i_;
+    int32_t i_[MaxLen];
     int32_t len_;
 };
 
@@ -197,6 +214,7 @@ public:
                     int len = 0;
                     snake.tail_ = trace_tail(base_map, i, &len);
                     snake.len_ += len;
+                    snake.init_locations_from_tail();
                     snakes_[snake_count++] = snake;
                     max_len = std::max(max_len, (int) snake.len_);
                 } else if (isdigit(c)) {
@@ -321,24 +339,30 @@ public:
 
         void draw_snake(const State& st, int si, bool draw_path) {
             const Snake& snake = st.snakes_[si];
-            int i = snake.i_;
             int id = snake_id(si);
-            uint64_t tail = snake.tail_;
-            int segment = 0;
-            for (int j = 0; j < snake.len_; ++j) {
-                if (j == 0 || !draw_path) {
-                    obj_map_[i] = id;
-                } else {
-                    switch (segment) {
-                    case UP: obj_map_[i] = '^'; break;
-                    case DOWN: obj_map_[i] = 'v'; break;
-                    case LEFT: obj_map_[i] = '<'; break;
-                    case RIGHT: obj_map_[i] = '>'; break;
+            if (draw_path) {
+                int i = snake.i_[0];
+                uint64_t tail = snake.tail_;
+                int segment = 0;
+                for (int j = 0; j < snake.len_; ++j) {
+                    if (j == 0 || !draw_path) {
+                        obj_map_[i] = id;
+                    } else {
+                        switch (segment) {
+                        case UP: obj_map_[i] = '^'; break;
+                        case DOWN: obj_map_[i] = 'v'; break;
+                        case LEFT: obj_map_[i] = '<'; break;
+                        case RIGHT: obj_map_[i] = '>'; break;
+                        }
                     }
+                    segment = tail & Snake::kDirMask;
+                    i -= Snake::apply_direction(tail & Snake::kDirMask);
+                    tail >>= Snake::kDirBits;
                 }
-                segment = tail & Snake::kDirMask;
-                i -= Snake::apply_direction(tail & Snake::kDirMask);
-                tail >>= Snake::kDirBits;
+            } else {
+                for (int i = 0; i < snake.len_; ++i) {
+                    obj_map_[snake.i_[i]] = id;
+                }
             }
         }
 
@@ -432,7 +456,7 @@ public:
             ObjMap<> push_map(push_st, map);
             for (auto dir : dirs) {
                 int delta = Snake::apply_direction(dir);
-                int to = snakes_[si].i_ + delta;
+                int to = snakes_[si].i_[0] + delta;
                 int pushed_ids = 0;
                 int fruit_index = 0;
                 if (is_valid_grow(map, to, &fruit_index)) {
@@ -454,7 +478,7 @@ public:
                     }
                 } else if (is_valid_push(map, push_map,
                                          snake_id(si),
-                                         snakes_[si].i_,
+                                         snakes_[si].i_[0],
                                          delta,
                                          &pushed_ids) &&
                            !(pushed_ids & snake_mask(si))) {
@@ -506,9 +530,9 @@ public:
     }
 
     void do_pushes(const ObjMap<>& obj_map, int pushed_ids, int push_delta) {
-        for (int i = 0; i < SnakeCount; ++i) {
-            if (pushed_ids & snake_mask(i)) {
-                snakes_[i].i_ += push_delta;
+        for (int si = 0; si < SnakeCount; ++si) {
+            if (pushed_ids & snake_mask(si)) {
+                snakes_[si].translate(push_delta);
             }
         }
         for (int i = 0; i < GadgetCount; ++i) {
@@ -571,7 +595,7 @@ public:
                        int pusher_id,
                        int push_at,
                        int delta,
-                       int* pushed_ids) const {
+                       int* pushed_ids) const __attribute__((noinline)) {
         int to = push_at + delta;
 
         if (obj_map.no_object_at(to) ||
@@ -625,13 +649,12 @@ public:
                              const ObjMap<>& obj_map,
                              int si,
                              int delta,
-                             int* pushed_ids) const {
+                             int* pushed_ids) const __attribute__((noinline)) {
         const Snake& snake = snakes_[si];
-        // The space the Snake's head would be pushed to.
-        int to = snake.i_ + delta;
 
-        uint64_t tail = snake.tail_;
-        for (int j = 0; j < snake.len_; ++j) {
+        for (int i = 0; i < snake.len_; ++i) {
+            // The space the Snake's head would be pushed to.
+            int to = snake.i_[i] + delta;
             if (!empty_terrain_at(map, to)) {
                 return false;
             }
@@ -641,8 +664,6 @@ public:
             if (obj_map.foreign_object_at(to, snake_id(si))) {
                 *pushed_ids |= obj_map.mask_at(to);
             }
-            to -= Snake::apply_direction(tail & Snake::kDirMask);
-            tail >>= Snake::kDirBits;
         }
 
         return true;
@@ -652,7 +673,7 @@ public:
                               const ObjMap<>& obj_map,
                               int gadget_index,
                               int delta,
-                              int* pushed_ids) const {
+                              int* pushed_ids) const __attribute__((noinline)) {
         const auto& gadget = map.gadgets_[gadget_index];
         int offset = gadgets_[gadget_index].offset_;
 
@@ -717,11 +738,9 @@ public:
                             const ObjMap<>& obj_map,
                             int si, int delta) {
         const Snake& snake = snakes_[si];
-        // The space where the head teleports to
-        int to = snake.i_ + delta;
 
-        uint64_t tail = snake.tail_;
-        for (int j = 0; j < snake.len_; ++j) {
+        for (int i = 0; i < snake.len_; ++i) {
+            int to = snake.i_[i] + delta;
             if (map[to] != ' ') {
                 return false;
             }
@@ -732,12 +751,10 @@ public:
             if (!obj_map.no_object_at(to)) {
                 return false;
             }
-
-            to -= Snake::apply_direction(tail & Snake::kDirMask);
-            tail >>= Snake::kDirBits;
         }
 
-        snakes_[si].i_ += delta;
+        snakes_[si].translate(delta);
+
         return true;
     }
 
@@ -868,7 +885,7 @@ public:
             if (snake.len_) {
                 if (snake_head_at_exit(map, snake)) {
                     snake.len_ = 0;
-                    snake.i_ = 0;
+                    snake.i_[0] = 0;
                     snake.tail_ = 0;
                 }
             }
@@ -889,12 +906,10 @@ public:
                          const ObjMap<>& obj_map,
                          int si) const {
         const Snake& snake = snakes_[si];
-        // The space below the snake's head.
-        int below = snake.i_ + W;
         int pushed_ids = snake_mask(si);
 
-        uint64_t tail = snake.tail_;
-        for (int j = 0; j < snake.len_; ++j) {
+        for (int i = 0; i < snake.len_; ++i) {
+            int below = snake.i_[i] + W;
             if (map[below] == '.' ||
                 obj_map.fruit_at(below)) {
                 return 0;
@@ -902,9 +917,6 @@ public:
             if (obj_map.foreign_object_at(below, snake_id(si))) {
                 pushed_ids |= obj_map.mask_at(below);
             }
-
-            below -= Snake::apply_direction(tail & Snake::kDirMask);
-            tail >>= Snake::kDirBits;
         }
 
         return pushed_ids;
@@ -936,17 +948,14 @@ public:
 
     bool snake_head_at_exit(const Map& map, const Snake& snake) const {
         // Only the head of the snake will trigger an exit
-        return snake.i_ == map.exit_;
+        return snake.i_[0] == map.exit_;
     }
 
     bool snake_intersects_hazard(const Map& map, const Snake& snake) const {
-        int i = snake.i_;
-        uint64_t tail = snake.tail_;
-        for (int j = 0; j < snake.len_; ++j) {
-            if (map[i] == '~' || map[i] == '#')
+        for (int i = 0; i < snake.len_; ++i) {
+            int at = snake.i_[i];
+            if (map[at] == '~' || map[at] == '#')
                 return true;
-            i -= Snake::apply_direction(tail & Snake::kDirMask);
-            tail >>= Snake::kDirBits;
         }
 
         return false;
