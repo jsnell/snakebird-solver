@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <cassert>
-#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
@@ -136,25 +135,6 @@ public:
     NewStates new_states_;
     std::vector<size_t> seen_states_round_start_;
     std::vector<size_t> seen_states_round_end_;
-};
-
-template<class Clock=typename std::chrono::high_resolution_clock>
-struct MeasureTime {
-    MeasureTime(double* target)
-        : target_(target),
-          start_(Clock::now()) {
-
-    }
-
-    ~MeasureTime() {
-        auto end = Clock::now();
-        // What a marvelous API.
-        auto duration = std::chrono::duration_cast<std::chrono::duration<double>>(end - start_);
-        *target_ += duration.count();
-    }
-
-    double* target_;
-    typename Clock::time_point start_;
 };
 
 template<class T, size_t SZ>
