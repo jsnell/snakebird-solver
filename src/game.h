@@ -9,9 +9,15 @@ enum Direction {
     UP, RIGHT, DOWN, LEFT,
 };
 
+// The dynamic representation of a Snakebird.
+//
+// H, W: The height and width of the map
+// MaxLen: The maximum number of segments any Snake could have
+//   in this scenario.
 template<int H, int W, int MaxLen>
 class Snake {
 public:
+    // Number of bits used to pack a direction.
     static const int kDirBits = 2;
     static const uint64_t kDirMask = (1 << kDirBits) - 1;
     static const int kTailBits = ((MaxLen - 1) * kDirBits);
@@ -164,115 +170,122 @@ struct GadgetState {
 
 template<int H, int W, int FruitCount, int SnakeCount, int SnakeMaxLen,
          int GadgetCount=0, int TeleporterCount=0>
-class State {
+class Map {
 public:
     using Snake = typename ::Snake<H, W, SnakeMaxLen>;
     using Teleporter = typename std::pair<int, int>;
 
-    static const uint16_t kGadgetDeleted = 0;
-
-    class Map {
-    public:
-        explicit Map(const char* base_map) : exit_(0) {
-            assert(strlen(base_map) == H * W);
-            base_map_ = new uint8_t[H * W];
-            int fruit_count = 0;
-            int snake_count = 0;
-            int teleporter_count = 0;
-            int max_len = 0;
-            std::unordered_map<int, int> half_teleporter;
-            for (int i = 0; i < H * W; ++i) {
-                const char c = base_map[i];
-                if (c == 'O') {
-                    if (FruitCount) {
-                        fruit_[fruit_count++] = i;
-                    }
-                    base_map_[i] = ' ';
-                } else if (c == '*') {
-                    assert(!exit_);
-                    base_map_[i] = ' ';
-                    exit_ = i;
-                } else if (c == 'T') {
-                    if (half_teleporter[c]) {
-                        teleporters_[teleporter_count++] =
-                            std::make_pair(half_teleporter[c], i);
-                    } else {
-                        half_teleporter[c] = i;
-                    }
-                    base_map_[i] = ' ';
-                } else if (c == 'R' || c == 'G' || c == 'B') {
-                    base_map_[i] = ' ';
-                    Snake snake = Snake(i);
-                    int len = 0;
-                    snake.tail_ = trace_tail(base_map, i, &len);
-                    snake.len_ += len;
-                    snake.init_locations_from_tail();
-                    snakes_[snake_count++] = snake;
-                    max_len = std::max(max_len, (int) snake.len_);
-                } else if (isdigit(c)) {
-                    base_map_[i] = ' ';
-                    uint32_t index = c - '0';
-                    assert(index < GadgetCount);
-                    if (!gadgets_[index].size_) {
-                        gadgets_[index].initial_offset_ = i;
-                    }
-                    gadgets_[index].add(i - gadgets_[index].initial_offset_);
-                } else if (c == '>' || c == '<' || c == '^' || c == 'v') {
-                    base_map_[i] = ' ';
-                } else {
-                    base_map_[i] = c;
+    explicit Map(const char* base_map) : exit_(0) {
+        assert(strlen(base_map) == H * W);
+        base_map_ = new uint8_t[H * W];
+        int fruit_count = 0;
+        int snake_count = 0;
+        int teleporter_count = 0;
+        int max_len = 0;
+        std::unordered_map<int, int> half_teleporter;
+        for (int i = 0; i < H * W; ++i) {
+            const char c = base_map[i];
+            if (c == 'O') {
+                if (FruitCount) {
+                    fruit_[fruit_count++] = i;
                 }
+                base_map_[i] = ' ';
+            } else if (c == '*') {
+                assert(!exit_);
+                base_map_[i] = ' ';
+                exit_ = i;
+            } else if (c == 'T') {
+                if (half_teleporter[c]) {
+                    teleporters_[teleporter_count++] =
+                        std::make_pair(half_teleporter[c], i);
+                } else {
+                    half_teleporter[c] = i;
+                }
+                base_map_[i] = ' ';
+            } else if (c == 'R' || c == 'G' || c == 'B') {
+                base_map_[i] = ' ';
+                Snake snake = Snake(i);
+                int len = 0;
+                snake.tail_ = trace_tail(base_map, i, &len);
+                snake.len_ += len;
+                snake.init_locations_from_tail();
+                snakes_[snake_count++] = snake;
+                max_len = std::max(max_len, (int) snake.len_);
+            } else if (isdigit(c)) {
+                base_map_[i] = ' ';
+                uint32_t index = c - '0';
+                assert(index < GadgetCount);
+                if (!gadgets_[index].size_) {
+                    gadgets_[index].initial_offset_ = i;
+                }
+                gadgets_[index].add(i - gadgets_[index].initial_offset_);
+            } else if (c == '>' || c == '<' || c == '^' || c == 'v') {
+                base_map_[i] = ' ';
+            } else {
+                base_map_[i] = c;
             }
-
-            std::sort(&gadgets_[0], &gadgets_[GadgetCount]);
-
-            if (SnakeMaxLen < max_len + FruitCount) {
-                fprintf(stderr, "Expected SnakeMaxLen >= %d, got %d\n",
-                        max_len + FruitCount,
-                        SnakeMaxLen);
-            }
-            assert(fruit_count == FruitCount);
-            assert(snake_count == SnakeCount);
-            assert(teleporter_count == TeleporterCount);
-            assert(exit_);
         }
 
-        uint32_t trace_tail(const char* base_map, int i, int* len) const {
-            if (base_map[i - 1] == '>') {
-                ++*len;
-                return RIGHT |
-                    (trace_tail(base_map, i - 1, len) << Snake::kDirBits);
-            }
-            if (base_map[i + 1] == '<') {
-                ++*len;
-                return LEFT |
-                    (trace_tail(base_map, i + 1, len) << Snake::kDirBits);
-            }
-            if (base_map[i - W] == 'v') {
-                ++*len;
-                return DOWN |
-                    (trace_tail(base_map, i - W, len) << Snake::kDirBits);
-            }
-            if (base_map[i + W] == '^') {
-                ++*len;
-                return UP |
-                    (trace_tail(base_map, i + W, len) << Snake::kDirBits);
-            }
+        std::sort(&gadgets_[0], &gadgets_[GadgetCount]);
 
-            return 0;
+        if (SnakeMaxLen < max_len + FruitCount) {
+            fprintf(stderr, "Expected SnakeMaxLen >= %d, got %d\n",
+                    max_len + FruitCount,
+                    SnakeMaxLen);
+        }
+        assert(fruit_count == FruitCount);
+        assert(snake_count == SnakeCount);
+        assert(teleporter_count == TeleporterCount);
+        assert(exit_);
+    }
+
+    uint32_t trace_tail(const char* base_map, int i, int* len) const {
+        if (base_map[i - 1] == '>') {
+            ++*len;
+            return RIGHT |
+                (trace_tail(base_map, i - 1, len) << Snake::kDirBits);
+        }
+        if (base_map[i + 1] == '<') {
+            ++*len;
+            return LEFT |
+                (trace_tail(base_map, i + 1, len) << Snake::kDirBits);
+        }
+        if (base_map[i - W] == 'v') {
+            ++*len;
+            return DOWN |
+                (trace_tail(base_map, i - W, len) << Snake::kDirBits);
+        }
+        if (base_map[i + W] == '^') {
+            ++*len;
+            return UP |
+                (trace_tail(base_map, i + W, len) << Snake::kDirBits);
         }
 
-        uint8_t operator[](int i) const {
-            return this->base_map_[i];
-        }
+        return 0;
+    }
 
-        uint8_t* base_map_;
-        int exit_;
-        int fruit_[FruitCount];
-        Snake snakes_[SnakeCount];
-        Gadget gadgets_[GadgetCount];
-        Teleporter teleporters_[TeleporterCount];
-    };
+    uint8_t operator[](int i) const {
+        return this->base_map_[i];
+    }
+
+    uint8_t* base_map_;
+    int exit_;
+    int fruit_[FruitCount];
+    Snake snakes_[SnakeCount];
+    Gadget gadgets_[GadgetCount];
+    Teleporter teleporters_[TeleporterCount];
+};
+
+template<int H, int W, int FruitCount, int SnakeCount, int SnakeMaxLen,
+         int GadgetCount=0, int TeleporterCount=0>
+class State {
+public:
+    using Snake = typename ::Snake<H, W, SnakeMaxLen>;
+    using Teleporter = typename std::pair<int, int>;
+    using Map = typename ::Map<H, W, FruitCount, SnakeCount,
+                               SnakeMaxLen, GadgetCount, TeleporterCount>;
+
+    static const uint16_t kGadgetDeleted = 0;
 
     template<bool draw_tail=false>
     class ObjMap {
