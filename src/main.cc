@@ -292,7 +292,7 @@ int search(St start_state, const Map& map) {
                                   st_pair pair(new_state, 0);
                                   auto hash = CityHash64((char*) pair.a.p_.bytes_,
                                                          sizeof(pair.a.p_.bytes_));
-                                  pair.parent_hash = parent_hash;
+                                  pair.parent_hash = parent_hash & 0x7f;
                                   outputs[hash & shard_mask].insert(pair);
                                   // new_states.push_back(
                                   //     st_pair(new_state, depth));
