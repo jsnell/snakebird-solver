@@ -193,6 +193,11 @@ int search(St start_state, const Map& map) {
             return a == other.a;
         }
 
+        uint64_t hash() const {
+            return CityHash64((char*) a.p_.bytes_,
+                              sizeof(a.p_.bytes_));
+        }
+
         Packed a;
         uint8_t parent_hash = 0;
     };
@@ -214,10 +219,8 @@ int search(St start_state, const Map& map) {
            kTargetMemoryBytes / kShards / 1000 / 1000);
 
     {
-        auto pair = st_pair(start_state, 0);
-        auto hash = CityHash64((char*) pair.a.p_.bytes_,
-                               sizeof(pair.a.p_.bytes_));
-        pair.parent_hash = hash & shard_mask;
+        auto pair = st_pair(start_state, 0xfe);
+        auto hash = pair.hash();;
         outputs[hash & shard_mask].insert(pair);
         St(pair.a).print(map);
     }
@@ -279,8 +282,7 @@ int search(St start_state, const Map& map) {
                 printf(".");
                 fflush(stdout);
             }
-            auto parent_hash = CityHash64((char*) packed.p_.bytes_,
-                                          sizeof(packed.p_.bytes_));
+            auto parent_hash = st_pair(packed, 0).hash();
 
             st.do_valid_moves(map,
                               [&depth, &outputs, &win, &map, &parent_hash,
@@ -289,13 +291,11 @@ int search(St start_state, const Map& map) {
                                            int si,
                                            Direction dir) {
                                   new_state.canonicalize(map);
-                                  st_pair pair(new_state, 0);
-                                  auto hash = CityHash64((char*) pair.a.p_.bytes_,
-                                                         sizeof(pair.a.p_.bytes_));
-                                  pair.parent_hash = parent_hash & 0x7f;
+                                  st_pair pair(new_state,
+                                               parent_hash & 0x7f);
+
+                                  auto hash = pair.hash();
                                   outputs[hash & shard_mask].insert(pair);
-                                  // new_states.push_back(
-                                  //     st_pair(new_state, depth));
                                   if (new_state.win()) {
                                       win_state = pair;
                                       win = true;
