@@ -10,7 +10,7 @@ int level_00() {
         "........................";
 
 
-    using St = State<8, 24, 2, 1, 5>;
+    using St = State<Setup<8, 24, 2, 1, 5>>;
     St::Map map(base_map);
     St st(map);
     st.print(map);

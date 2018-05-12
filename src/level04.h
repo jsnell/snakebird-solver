@@ -14,7 +14,7 @@ int level_04() {
         ".    ..  ."
         "~~~~~~~~~~";
 
-    using St = State<13, 10, 1, 1, 5>;
+    using St = State<Setup<13, 10, 1, 1, 5>>;
     St::Map map(base_map);
     St st(map);
 

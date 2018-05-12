@@ -15,7 +15,7 @@ int level_star2() {
         ".    ...          ."
         "~~~~~~~~~~~~~~~~~~~";
 
-    using St = State<14, 19, 26, 1, 29, 0>;
+    using St = State<Setup<14, 19, 26, 1, 29, 0>>;
     St::Map map(base_map);
     St st(map);
     st.print(map);

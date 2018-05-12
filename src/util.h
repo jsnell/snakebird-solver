@@ -13,4 +13,8 @@ struct integer_length<1> {
     enum { value = 1 };
 };
 
+constexpr uint64_t mask_n_bits(uint64_t n) {
+    return (1 << n) - 1;
+}
+
 #endif

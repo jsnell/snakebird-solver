@@ -9,20 +9,47 @@ enum Direction {
     UP, RIGHT, DOWN, LEFT,
 };
 
+template<int H_, int W_, int FruitCount_,
+         int SnakeCount_, int SnakeMaxLen_,
+         int GadgetCount_=0, int TeleporterCount_=0>
+struct Setup {
+    static const int H = H_;
+    static const int W = W_;
+    static const int FruitCount = FruitCount_;
+    static const int SnakeCount = SnakeCount_;
+    static const int SnakeMaxLen = SnakeMaxLen_;
+    static const int GadgetCount = GadgetCount_;
+    static const int TeleporterCount = TeleporterCount_;
+    static const int ObjCount = SnakeCount + GadgetCount;
+
+    static const int MapSize = Setup::H * Setup::W;
+
+    // Number of bits used to pack a direction.
+    static const int kDirBits = 2;
+    static const uint64_t kDirMask = mask_n_bits(kDirBits);
+    static const int kIndexBits = integer_length<MapSize>::value;
+    static const int kLenBits = integer_length<SnakeMaxLen>::value;
+
+    // Converting between directions and linear coordinate deltas.
+    static int apply_direction(Direction dir) {
+        static int deltas[] = { -W, 1, W, -1 };
+        return deltas[dir];
+    }
+
+    static int apply_direction(int dir) {
+        return apply_direction(Direction(dir));
+    }
+};
+
 // The dynamic representation of a Snakebird.
 //
 // H, W: The height and width of the map
 // MaxLen: The maximum number of segments any Snake could have
 //   in this scenario.
-template<int H, int W, int MaxLen>
+template<class Setup>
 class Snake {
 public:
-    // Number of bits used to pack a direction.
-    static const int kDirBits = 2;
-    static const uint64_t kDirMask = (1 << kDirBits) - 1;
-    static const int kTailBits = ((MaxLen - 1) * kDirBits);
-    static const int kIndexBits = integer_length<H * W>::value;
-    static const int kLenBits = integer_length<MaxLen>::value;
+    static const int kTailBits = ((Setup::SnakeMaxLen - 1) * Setup::kDirBits);
 
     Snake() : tail_(0), len_(0) {
         i_[0] = 0;
@@ -31,35 +58,26 @@ public:
     Snake(int i)
         : tail_(0),
           len_(1) {
-        assert(i < H * W);
+        assert(i < Setup::MapSize);
         i_[0] = i;
     }
 
     void grow(Direction dir) {
         std::copy(&i_[0], &i_[len_], &i_[1]);
-        i_[0] = i_[1] + apply_direction(dir);
+        i_[0] = i_[1] + Setup::apply_direction(dir);
         ++len_;
-        tail_ = (tail_ << kDirBits) | dir;
+        tail_ = (tail_ << Setup::kDirBits) | dir;
     }
 
     void move(Direction dir) {
         std::copy_backward(&i_[0], &i_[len_ - 1], &i_[len_]);
-        i_[0] = i_[1] + apply_direction(dir);
-        tail_ &= ~(kDirMask << ((len_ - 2) * kDirBits));
-        tail_ = (tail_ << kDirBits) | dir;
+        i_[0] = i_[1] + Setup::apply_direction(dir);
+        tail_ &= ~(Setup::kDirMask << ((len_ - 2) * Setup::kDirBits));
+        tail_ = (tail_ << Setup::kDirBits) | dir;
     }
 
     Direction tail(int i) const {
-        return Direction((tail_ >> (i * kDirBits)) & kDirMask);
-    }
-
-    static int apply_direction(Direction dir) {
-        static int deltas[] = { -W, 1, W, -1 };
-        return deltas[dir];
-    }
-
-    static int apply_direction(int dir) {
-        return apply_direction(Direction(dir));
+        return Direction((tail_ >> (i * Setup::kDirBits)) & Setup::kDirMask);
     }
 
     bool operator<(const Snake& other) const {
@@ -84,13 +102,13 @@ public:
             at = packer->extract(data, packed_width(), at);
             tail_ = data & ((UINT64_C(1) << kTailBits) - 1);
             data >>= kTailBits;
-            i_[0] = data & ((UINT64_C(1) << kIndexBits) - 1);
-            data >>= kIndexBits;
-            len_ = data & ((UINT64_C(1) << kLenBits) - 1);
+            i_[0] = data & ((UINT64_C(1) << Setup::kIndexBits) - 1);
+            data >>= Setup::kIndexBits;
+            len_ = data & ((UINT64_C(1) << Setup::kLenBits) - 1);
         } else {
             at = packer->extract(tail_, kTailBits, at);
-            at = packer->extract(i_[0], kIndexBits, at);
-            at = packer->extract(len_, kLenBits, at);
+            at = packer->extract(i_[0], Setup::kIndexBits, at);
+            at = packer->extract(len_, Setup::kLenBits, at);
         }
         init_locations_from_tail();
         return at;
@@ -101,24 +119,24 @@ public:
         if (packed_width() <= 64) {
             at = packer->deposit(tail_ |
                                  ((uint64_t) i_[0] << kTailBits) |
-                                 ((uint64_t) len_ << (kTailBits + kIndexBits)),
+                                 ((uint64_t) len_ << (kTailBits + Setup::kIndexBits)),
                                  packed_width(),
                                  at);
         } else {
             at = packer->deposit(tail_, kTailBits, at);
-            at = packer->deposit(i_[0], kIndexBits, at);
-            at = packer->deposit(len_, kLenBits, at);
+            at = packer->deposit(i_[0], Setup::kIndexBits, at);
+            at = packer->deposit(len_, Setup::kLenBits, at);
         }
         return at;
     }
 
     static constexpr uint64_t packed_width() {
-        return kTailBits + kIndexBits + kLenBits;
+        return kTailBits + Setup::kIndexBits + Setup::kLenBits;
     }
 
     void init_locations_from_tail() {
         for (int i = 1; i < len_; ++i) {
-            i_[i] = i_[i - 1] - apply_direction(tail(i - 1));
+            i_[i] = i_[i - 1] - Setup::apply_direction(tail(i - 1));
         }
     }
 
@@ -129,7 +147,7 @@ public:
     }
 
     uint64_t tail_;
-    int32_t i_[MaxLen];
+    int32_t i_[Setup::SnakeMaxLen];
     int32_t len_;
 };
 
@@ -168,25 +186,24 @@ struct GadgetState {
     uint16_t offset_ = 0;
 };
 
-template<int H, int W, int FruitCount, int SnakeCount, int SnakeMaxLen,
-         int GadgetCount=0, int TeleporterCount=0>
+template<class Setup>
 class Map {
 public:
-    using Snake = typename ::Snake<H, W, SnakeMaxLen>;
+    using Snake = typename ::Snake<Setup>;
     using Teleporter = typename std::pair<int, int>;
 
     explicit Map(const char* base_map) : exit_(0) {
-        assert(strlen(base_map) == H * W);
-        base_map_ = new uint8_t[H * W];
+        assert(strlen(base_map) == Setup::MapSize);
+        base_map_ = new uint8_t[Setup::MapSize];
         int fruit_count = 0;
         int snake_count = 0;
         int teleporter_count = 0;
         int max_len = 0;
         std::unordered_map<int, int> half_teleporter;
-        for (int i = 0; i < H * W; ++i) {
+        for (int i = 0; i < Setup::MapSize; ++i) {
             const char c = base_map[i];
             if (c == 'O') {
-                if (FruitCount) {
+                if (Setup::FruitCount) {
                     fruit_[fruit_count++] = i;
                 }
                 base_map_[i] = ' ';
@@ -214,7 +231,7 @@ public:
             } else if (isdigit(c)) {
                 base_map_[i] = ' ';
                 uint32_t index = c - '0';
-                assert(index < GadgetCount);
+                assert(index < Setup::GadgetCount);
                 if (!gadgets_[index].size_) {
                     gadgets_[index].initial_offset_ = i;
                 }
@@ -226,16 +243,16 @@ public:
             }
         }
 
-        std::sort(&gadgets_[0], &gadgets_[GadgetCount]);
+        std::sort(&gadgets_[0], &gadgets_[Setup::GadgetCount]);
 
-        if (SnakeMaxLen < max_len + FruitCount) {
+        if (Setup::SnakeMaxLen < max_len + Setup::FruitCount) {
             fprintf(stderr, "Expected SnakeMaxLen >= %d, got %d\n",
-                    max_len + FruitCount,
-                    SnakeMaxLen);
+                    max_len + Setup::FruitCount,
+                    Setup::SnakeMaxLen);
         }
-        assert(fruit_count == FruitCount);
-        assert(snake_count == SnakeCount);
-        assert(teleporter_count == TeleporterCount);
+        assert(fruit_count == Setup::FruitCount);
+        assert(snake_count == Setup::SnakeCount);
+        assert(teleporter_count == Setup::TeleporterCount);
         assert(exit_);
     }
 
@@ -243,22 +260,22 @@ public:
         if (base_map[i - 1] == '>') {
             ++*len;
             return RIGHT |
-                (trace_tail(base_map, i - 1, len) << Snake::kDirBits);
+                (trace_tail(base_map, i - 1, len) << Setup::kDirBits);
         }
         if (base_map[i + 1] == '<') {
             ++*len;
             return LEFT |
-                (trace_tail(base_map, i + 1, len) << Snake::kDirBits);
+                (trace_tail(base_map, i + 1, len) << Setup::kDirBits);
         }
-        if (base_map[i - W] == 'v') {
+        if (base_map[i - Setup::W] == 'v') {
             ++*len;
             return DOWN |
-                (trace_tail(base_map, i - W, len) << Snake::kDirBits);
+                (trace_tail(base_map, i - Setup::W, len) << Setup::kDirBits);
         }
-        if (base_map[i + W] == '^') {
+        if (base_map[i + Setup::W] == '^') {
             ++*len;
             return UP |
-                (trace_tail(base_map, i + W, len) << Snake::kDirBits);
+                (trace_tail(base_map, i + Setup::W, len) << Setup::kDirBits);
         }
 
         return 0;
@@ -270,20 +287,18 @@ public:
 
     uint8_t* base_map_;
     int exit_;
-    int fruit_[FruitCount];
-    Snake snakes_[SnakeCount];
-    Gadget gadgets_[GadgetCount];
-    Teleporter teleporters_[TeleporterCount];
+    int fruit_[Setup::FruitCount];
+    Snake snakes_[Setup::SnakeCount];
+    Gadget gadgets_[Setup::GadgetCount];
+    Teleporter teleporters_[Setup::TeleporterCount];
 };
 
-template<int H, int W, int FruitCount, int SnakeCount, int SnakeMaxLen,
-         int GadgetCount=0, int TeleporterCount=0>
+template<class Setup>
 class State {
 public:
-    using Snake = typename ::Snake<H, W, SnakeMaxLen>;
+    using Snake = typename ::Snake<Setup>;
     using Teleporter = typename std::pair<int, int>;
-    using Map = typename ::Map<H, W, FruitCount, SnakeCount,
-                               SnakeMaxLen, GadgetCount, TeleporterCount>;
+    using Map = typename ::Map<Setup>;
 
     static const uint16_t kGadgetDeleted = 0;
 
@@ -298,7 +313,7 @@ public:
             return obj_map_[i] == empty_id();
         }
 
-        int fruit_id() const { return (1 + SnakeCount + GadgetCount); }
+        int fruit_id() const { return 1 + Setup::ObjCount; }
         bool fruit_at(int i) const {
             return obj_map_[i] == fruit_id();
         }
@@ -322,16 +337,16 @@ public:
         void draw_objs(const State& st,
                        const Map& map,
                        bool draw_path) {
-            memset(obj_map_, empty_id(), H * W);
-            for (int si = 0; si < SnakeCount; ++si) {
+            memset(obj_map_, empty_id(), Setup::MapSize);
+            for (int si = 0; si < Setup::SnakeCount; ++si) {
                 draw_snake(st, si, draw_path);
             }
-            for (int fi = 0; fi < FruitCount; ++fi) {
+            for (int fi = 0; fi < Setup::FruitCount; ++fi) {
                 if (st.fruit_active(fi)) {
                     obj_map_[map.fruit_[fi]] = fruit_id();
                 }
             }
-            for (int gi = 0; gi < GadgetCount; ++gi) {
+            for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
                 int offset = st.gadgets_[gi].offset_;
                 if (offset != kGadgetDeleted) {
                     const auto& gadget = map.gadgets_[gi];
@@ -360,9 +375,9 @@ public:
                         case RIGHT: obj_map_[i] = '>'; break;
                         }
                     }
-                    segment = tail & Snake::kDirMask;
-                    i -= Snake::apply_direction(tail & Snake::kDirMask);
-                    tail >>= Snake::kDirBits;
+                    segment = tail & Setup::kDirMask;
+                    i -= Setup::apply_direction(tail & Setup::kDirMask);
+                    tail >>= Setup::kDirBits;
                 }
             } else {
                 for (int i = 0; i < snake.len_; ++i) {
@@ -371,26 +386,26 @@ public:
             }
         }
 
-        uint8_t obj_map_[H * W];
+        uint8_t obj_map_[Setup::MapSize];
     };
     static int empty_id() { return 0; }
     static int snake_id(int si) { return (1 + si); }
     static int snake_mask(int si) { return 1 << si; }
-    static int gadget_id(int i) { return (1 + i + SnakeCount); }
-    static int gadget_mask(int i) { return 1 << (SnakeCount + i); }
+    static int gadget_id(int i) { return (1 + i + Setup::SnakeCount); }
+    static int gadget_mask(int i) { return 1 << (Setup::SnakeCount + i); }
 
     State() {
-        fruit_ = (1 << FruitCount) - 1;
-        for (int gi = 0; gi < GadgetCount; ++gi) {
+        fruit_ = mask_n_bits(Setup::FruitCount);
+        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
             gadgets_[gi].template_ = gi;
         }
     }
 
     State(const Map& map) : State() {
-        for (int si = 0; si < SnakeCount; ++si) {
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
             snakes_[si] = map.snakes_[si];
         }
-        for (int gi = 0; gi < GadgetCount; ++gi) {
+        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
             gadgets_[gi].offset_ = map.gadgets_[gi].initial_offset_;
             gadgets_[gi].template_ = gi;
         }
@@ -399,9 +414,9 @@ public:
     void print(const Map& map) const {
         ObjMap<true> obj_map(*this, map);
 
-        for (int i = 0; i < H; ++i) {
-            for (int j = 0; j < W; ++j) {
-                int l = i * W + j;
+        for (int i = 0; i < Setup::H; ++i) {
+            for (int j = 0; j < Setup::W; ++j) {
+                int l = i * Setup::W + j;
                 bool teleport = false;
                 for (auto t : map.teleporters_) {
                     if (t.first == l || t.second == l) {
@@ -411,10 +426,10 @@ public:
                 if (!obj_map.no_object_at(l)) {
                     int id = obj_map.id_at(l);
                     char c;
-                    if (id < (SnakeCount + 1)) {
+                    if (id < (Setup::SnakeCount + 1)) {
                         c = 'A' + (id - 1);
-                    } else if (id < (SnakeCount + GadgetCount + 1)) {
-                        c = '0' + (id - 1 - SnakeCount);
+                    } else if (id < Setup::ObjCount + 1) {
+                        c = '0' + (id - 1 - Setup::SnakeCount);
                     } else if (id == obj_map.fruit_id()) {
                         c = 'Q';
                     } else {
@@ -451,7 +466,7 @@ public:
         };
         ObjMap<> obj_map(*this, map);
         uint32_t tele_mask = teleporter_overlap(map, obj_map);
-        for (int si = 0; si < SnakeCount; ++si) {
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
             if (!snakes_[si].len_) {
                 continue;
             }
@@ -460,7 +475,7 @@ public:
             push_st.snakes_[si].len_--;
             ObjMap<> push_map(push_st, map);
             for (auto dir : dirs) {
-                int delta = Snake::apply_direction(dir);
+                int delta = Setup::apply_direction(dir);
                 int to = snakes_[si].i_[0] + delta;
                 int pushed_ids = 0;
                 int fruit_index = 0;
@@ -505,9 +520,9 @@ public:
     }
 
     void canonicalize(const Map& map) {
-        std::sort(&snakes_[0], &snakes_[SnakeCount]);
-        if (GadgetCount > 0) {
-            std::sort(&gadgets_[0], &gadgets_[GadgetCount],
+        std::sort(&snakes_[0], &snakes_[Setup::SnakeCount]);
+        if (Setup::GadgetCount > 0) {
+            std::sort(&gadgets_[0], &gadgets_[Setup::GadgetCount],
                       [&map] (const GadgetState& a, const GadgetState& b) {
                           const Gadget& ag = map.gadgets_[a.template_];
                           const Gadget& bg = map.gadgets_[b.template_];
@@ -524,8 +539,8 @@ public:
 
     uint32_t teleporter_overlap(const Map& map, const ObjMap<>& objmap) const {
         uint32_t mask = 0;
-        const uint32_t width = SnakeCount + GadgetCount;
-        for (int ti = 0; ti < TeleporterCount; ++ti) {
+        const uint32_t width = Setup::ObjCount;
+        for (int ti = 0; ti < Setup::TeleporterCount; ++ti) {
             mask |=
                 ((objmap.mask_at(map.teleporters_[ti].first)) |
                  (objmap.mask_at(map.teleporters_[ti].second) << width))
@@ -535,12 +550,12 @@ public:
     }
 
     void do_pushes(const ObjMap<>& obj_map, int pushed_ids, int push_delta) {
-        for (int si = 0; si < SnakeCount; ++si) {
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
             if (pushed_ids & snake_mask(si)) {
                 snakes_[si].translate(push_delta);
             }
         }
-        for (int gi = 0; gi < GadgetCount; ++gi) {
+        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
             if (pushed_ids & gadget_mask(gi)) {
                 gadgets_[gi].offset_ += push_delta;
             }
@@ -550,13 +565,13 @@ public:
     bool destroy_if_intersects_hazard(const Map& map,
                                       const ObjMap<>& obj_map,
                                       int pushed_ids) {
-        for (int si = 0; si < SnakeCount; ++si) {
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
             if (pushed_ids & snake_mask(si)) {
                 if (snake_intersects_hazard(map, snakes_[si]))
                     return true;
             }
         }
-        for (int gi = 0; gi < GadgetCount; ++gi) {
+        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
             if (pushed_ids & gadget_mask(gi)) {
                 if (gadget_intersects_hazard(map, gi)) {
                     gadgets_[gi].offset_ = kGadgetDeleted;
@@ -569,7 +584,7 @@ public:
     bool is_valid_grow(const Map& map,
                        int to,
                        int* fruit_index) const {
-        for (int fi = 0; fi < FruitCount; ++fi) {
+        for (int fi = 0; fi < Setup::FruitCount; ++fi) {
             int fruit = map.fruit_[fi];
             if (fruit_active(fi) &&
                 fruit == to) {
@@ -614,7 +629,7 @@ public:
 
         while (again) {
             again = false;
-            for (int si = 0; si < SnakeCount; ++si) {
+            for (int si = 0; si < Setup::SnakeCount; ++si) {
                 if (*pushed_ids & snake_mask(si)) {
                     int new_pushed_ids = 0;
                     if (!snake_can_be_pushed(map, obj_map,
@@ -629,7 +644,7 @@ public:
                     }
                 }
             }
-            for (int gi = 0; gi < GadgetCount; ++gi) {
+            for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
                 if (*pushed_ids & gadget_mask(gi)) {
                     int new_pushed_ids = 0;
                     if (!gadget_can_be_pushed(map,
@@ -710,11 +725,11 @@ public:
         // with two different teleporter pairs being triggered at the
         // same time, so it's just a guess that this is how they'd
         // work.
-        for (int ti = 0; ti < TeleporterCount; ++ti) {
+        for (int ti = 0; ti < Setup::TeleporterCount; ++ti) {
             int delta = map.teleporters_[ti].second -
                 map.teleporters_[ti].first;
             for (int dir = 0; dir < 2; ++dir) {
-                for (int si = 0; si < SnakeCount; ++si) {
+                for (int si = 0; si < Setup::SnakeCount; ++si) {
                     if (test & only_new) {
                         if (try_snake_teleport(map, obj_map, si, delta)) {
                             teleported = true;
@@ -722,7 +737,7 @@ public:
                     }
                     test <<= 1;
                 }
-                for (int gi = 0; gi < GadgetCount; ++gi) {
+                for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
                     if (test & only_new) {
                         if (try_gadget_teleport(map, obj_map, gi, delta)) {
                             teleported = true;
@@ -792,8 +807,8 @@ public:
 
     bool process_gravity(const Map& map, uint32_t orig_tele_mask)
         __attribute__((noinline)) {
-        uint32_t recompute_falling = (1 << (SnakeCount + GadgetCount)) - 1;
-        uint32_t falling[SnakeCount + GadgetCount];
+        uint32_t recompute_falling = mask_n_bits(Setup::ObjCount);
+        uint32_t falling[Setup::ObjCount];
 
     again:
         // FIXME. Figure out if exits and teleporters have different
@@ -821,7 +836,7 @@ public:
         orig_tele_mask = new_tele_mask;
 
         uint32_t supported = 0;
-        for (int si = 0; si < SnakeCount; ++si) {
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
             int mask = 0;
             if (snakes_[si].len_) {
                 if (recompute_falling &
@@ -834,7 +849,7 @@ public:
                 supported |= snake_mask(si);
             }
         }
-        for (int gi = 0; gi < GadgetCount; ++gi) {
+        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
             int offset = gadgets_[gi].offset_;
             int mask = 0;
             if (offset != kGadgetDeleted) {
@@ -843,7 +858,7 @@ public:
                     mask = is_gadget_falling(map, obj_map, gi);
                 }
             }
-            falling[SnakeCount + gi] = mask;
+            falling[Setup::SnakeCount + gi] = mask;
             if (!mask) {
                 supported |= gadget_mask(gi);
             }
@@ -852,8 +867,8 @@ public:
 
         while (1) {
             bool again = false;
-            for (int i = 0; i < (SnakeCount + GadgetCount); ++i) {
-                int mask = (1 << i);
+            for (int i = 0; i < Setup::ObjCount; ++i) {
+                int mask = 1 << i;
                 if (!(supported & mask) &&
                     (supported & falling[i])) {
                     supported |= mask;
@@ -865,11 +880,11 @@ public:
             }
         }
 
-        uint32_t to_push = ((1 << (SnakeCount + GadgetCount)) - 1)
+        uint32_t to_push = mask_n_bits(Setup::ObjCount)
             & ~supported;
 
         if (to_push) {
-            do_pushes(obj_map, to_push, W);
+            do_pushes(obj_map, to_push, Setup::W);
             if (destroy_if_intersects_hazard(map, obj_map, to_push)) {
                 return false;
             }
@@ -898,7 +913,7 @@ public:
     }
 
     bool win() {
-        for (int si = 0; si < SnakeCount; ++si) {
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
             if (snakes_[si].len_) {
                 return false;
             }
@@ -914,7 +929,7 @@ public:
         int pushed_ids = snake_mask(si);
 
         for (int i = 0; i < snake.len_; ++i) {
-            int below = snake.i_[i] + W;
+            int below = snake.i_[i] + Setup::W;
             if (map[below] == '.' ||
                 obj_map.fruit_at(below)) {
                 return 0;
@@ -937,7 +952,7 @@ public:
 
         for (int j = 0; j < gadget.size_; ++j) {
             int at = gadget.i_[j] + gadgets_[gi].offset_;
-            int below = at + W;
+            int below = at + Setup::W;
             if (map[below] == '.' ||
                 map[below] == '#' ||
                 obj_map.fruit_at(below)) {
@@ -982,9 +997,9 @@ public:
     }
 
     static constexpr uint64_t packed_width() {
-        return Snake::packed_width() * SnakeCount +
-            FruitCount +
-            Snake::kIndexBits * GadgetCount;
+        return Snake::packed_width() * Setup::SnakeCount +
+            Setup::FruitCount +
+            Setup::kIndexBits * Setup::GadgetCount;
     }
 
     struct Packed {
@@ -1034,13 +1049,13 @@ public:
 
     template<class P>
     uint64_t unpack(const P* packer, size_t at) {
-        for (int si = 0; si < SnakeCount; ++si) {
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
             at = snakes_[si].unpack(packer, at);
         }
-        at = packer->extract(fruit_, FruitCount, at);
-        for (int gi = 0 ; gi < GadgetCount; ++gi) {
+        at = packer->extract(fruit_, Setup::FruitCount, at);
+        for (int gi = 0 ; gi < Setup::GadgetCount; ++gi) {
             at = packer->extract(gadgets_[gi].offset_,
-                                 Snake::kIndexBits,
+                                 Setup::kIndexBits,
                                  at);
         }
         return at;
@@ -1048,20 +1063,20 @@ public:
 
     template<class P>
     uint64_t pack(P* packer, size_t at) const {
-        for (int si = 0; si < SnakeCount; ++si) {
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
             at = snakes_[si].pack(packer, at);
         }
-        at = packer->deposit(fruit_, FruitCount, at);
-        for (int gi = 0 ; gi < GadgetCount; ++gi) {
+        at = packer->deposit(fruit_, Setup::FruitCount, at);
+        for (int gi = 0 ; gi < Setup::GadgetCount; ++gi) {
             at = packer->deposit(gadgets_[gi].offset_,
-                                 Snake::kIndexBits,
+                                 Setup::kIndexBits,
                                  at);
         }
         return at;
     }
 
-    Snake snakes_[SnakeCount];
-    GadgetState gadgets_[GadgetCount];
+    Snake snakes_[Setup::SnakeCount];
+    GadgetState gadgets_[Setup::GadgetCount];
     uint64_t fruit_;
 };
 
