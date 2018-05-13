@@ -25,6 +25,7 @@
 
 template<class Seen, class Todo, class T>
 void dedup(Seen* seen_states, Todo* todo, T* new_begin, T* new_end) {
+    std::vector<bool> discard(new_end - new_begin);
     if (seen_states->size()) {
         auto it = new_begin;
         auto prev = *seen_states->begin();
@@ -36,7 +37,7 @@ void dedup(Seen* seen_states, Todo* todo, T* new_begin, T* new_end) {
                 ++it;
             }
             if (st == *it) {
-                it->parent_hash = 255;
+                discard[it - new_begin] = true;
             }
             prev = st;
         }
@@ -44,10 +45,10 @@ void dedup(Seen* seen_states, Todo* todo, T* new_begin, T* new_end) {
 
     seen_states->thaw();
 
-    for (T* it = new_begin; it != new_end; ++it) {
-        if (it->parent_hash != 255) {
-            seen_states->push_back(*it);
-            todo->push_back(it->a);
+    for (int i = 0; i < discard.size(); ++i) {
+        if (!discard[i]) {
+            seen_states->push_back(new_begin[i]);
+            todo->push_back(new_begin[i].a);
         }
     }
 }
