@@ -95,39 +95,18 @@ public:
     }
 
     template<class P>
-    uint64_t unpack(const P* packer, size_t at) {
-        tail_ = 0;
-        if (packed_width() <= 64) {
-            uint64_t data;
-            at = packer->extract(data, packed_width(), at);
-            tail_ = data & ((UINT64_C(1) << kTailBits) - 1);
-            data >>= kTailBits;
-            i_[0] = data & ((UINT64_C(1) << Setup::kIndexBits) - 1);
-            data >>= Setup::kIndexBits;
-            len_ = data & ((UINT64_C(1) << Setup::kLenBits) - 1);
-        } else {
-            at = packer->extract(tail_, kTailBits, at);
-            at = packer->extract(i_[0], Setup::kIndexBits, at);
-            at = packer->extract(len_, Setup::kLenBits, at);
-        }
+    void unpack(const P* packer, typename P::Context* pc) {
+        packer->extract(tail_, kTailBits, pc);
+        packer->extract(i_[0], Setup::kIndexBits, pc);
+        packer->extract(len_, Setup::kLenBits, pc);
         init_locations_from_tail();
-        return at;
     }
 
     template<class P>
-    uint64_t pack(P* packer, size_t at) const {
-        if (packed_width() <= 64) {
-            at = packer->deposit(tail_ |
-                                 ((uint64_t) i_[0] << kTailBits) |
-                                 ((uint64_t) len_ << (kTailBits + Setup::kIndexBits)),
-                                 packed_width(),
-                                 at);
-        } else {
-            at = packer->deposit(tail_, kTailBits, at);
-            at = packer->deposit(i_[0], Setup::kIndexBits, at);
-            at = packer->deposit(len_, Setup::kLenBits, at);
-        }
-        return at;
+    void pack(P* packer, typename P::Context* pc) const {
+        packer->deposit(tail_, kTailBits, pc);
+        packer->deposit(i_[0], Setup::kIndexBits, pc);
+        packer->deposit(len_, Setup::kLenBits, pc);
     }
 
     static constexpr uint64_t packed_width() {
@@ -1007,7 +986,9 @@ public:
 
         Packed() {}
         Packed(const State& st) {
-            st.pack(&p_, 0);
+            typename P::Context pc;
+            st.pack(&p_, &pc);
+            p_.flush(&pc);
         }
 
         bool operator==(const Packed& other) const {
@@ -1044,35 +1025,34 @@ public:
     };
 
     State(const Packed& p) : State() {
-        unpack(&p.p_, 0);
+        typename Packed::P::Context pc;
+        unpack(&p.p_, &pc);
     };
 
     template<class P>
-    uint64_t unpack(const P* packer, size_t at) {
+    void unpack(const P* packer, typename P::Context* pc) {
         for (int si = 0; si < Setup::SnakeCount; ++si) {
-            at = snakes_[si].unpack(packer, at);
+            snakes_[si].unpack(packer, pc);
         }
-        at = packer->extract(fruit_, Setup::FruitCount, at);
+        packer->extract(fruit_, Setup::FruitCount, pc);
         for (int gi = 0 ; gi < Setup::GadgetCount; ++gi) {
-            at = packer->extract(gadgets_[gi].offset_,
-                                 Setup::kIndexBits,
-                                 at);
+            packer->extract(gadgets_[gi].offset_,
+                            Setup::kIndexBits,
+                            pc);
         }
-        return at;
     }
 
     template<class P>
-    uint64_t pack(P* packer, size_t at) const {
+    void pack(P* packer, typename P::Context* pc) const {
         for (int si = 0; si < Setup::SnakeCount; ++si) {
-            at = snakes_[si].pack(packer, at);
+            snakes_[si].pack(packer, pc);
         }
-        at = packer->deposit(fruit_, Setup::FruitCount, at);
+        packer->deposit(fruit_, Setup::FruitCount, pc);
         for (int gi = 0 ; gi < Setup::GadgetCount; ++gi) {
-            at = packer->deposit(gadgets_[gi].offset_,
-                                 Setup::kIndexBits,
-                                 at);
+            packer->deposit(gadgets_[gi].offset_,
+                            Setup::kIndexBits,
+                            pc);
         }
-        return at;
     }
 
     Snake snakes_[Setup::SnakeCount];
