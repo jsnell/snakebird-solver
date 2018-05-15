@@ -64,8 +64,7 @@ public:
     }
 
     void flush() {
-        if (buffer_.size()) {
-            assert(fd_ >= 0);
+        if (buffer_.size() && fd_ >= 0) {
             size_t bytes = sizeof(T) * buffer_.size();
             assert(write(fd_, (char*) &buffer_[0], bytes) == bytes);
             buffer_.clear();
@@ -98,11 +97,12 @@ public:
     }
 
     void freeze() {
-        maybe_map(MAP_SHARED);
+        maybe_map(PROT_READ, MAP_SHARED);
     }
 
     void snapshot() {
-        maybe_map(MAP_PRIVATE);
+        maybe_map(PROT_READ | PROT_WRITE,
+                  MAP_PRIVATE);
     }
 
     void thaw() {
@@ -123,13 +123,12 @@ public:
     }
 
 private:
-    void maybe_map(int flags) {
+    void maybe_map(int prot, int flags) {
         assert(!frozen_);
         if (fd_ >= 0 && size_ > 0) {
             flush();
             size_t len = sizeof(T) * size_;
-            void* map = mmap(NULL, len, PROT_READ | PROT_WRITE,
-                             flags, fd_, 0);
+            void* map = mmap(NULL, len, prot, flags, fd_, 0);
             if (map == MAP_FAILED) {
                 perror("mmap");
                 abort();
