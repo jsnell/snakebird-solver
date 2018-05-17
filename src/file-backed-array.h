@@ -5,7 +5,7 @@
 
 template<class T,
          // 100M
-         size_t kFlushThresholdBytes = 100000000>
+         size_t kFlushThreshold = 100000000 / sizeof(T)>
 class file_backed_mmap_array {
 public:
     file_backed_mmap_array() {
@@ -86,7 +86,7 @@ public:
     void push_back(const T& data) {
         assert(!frozen_);
         buffer_.push_back(data);
-        if (buffer_.size() * sizeof(T) > kFlushThresholdBytes) {
+        if (buffer_.size() >= kFlushThreshold) {
             if (fd_ == -1) {
                 open();
             }

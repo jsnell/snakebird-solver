@@ -23,32 +23,69 @@
 #include "game.h"
 
 
-template<class Seen, class Todo, class T>
-void dedup(Seen* seen_states, Todo* todo, T* new_begin, T* new_end) {
+template<class Key, class Value>
+class Pair {
+public:
+    Pair() {
+    }
+
+    Pair(const Key& key, Value value)
+        : key_(key), value_(value) {
+    }
+
+    bool operator<(const Key& key) const {
+        return key_ < key;
+    }
+    bool operator==(const Key& key) const {
+        return key_ == key;
+    }
+
+    bool operator<(const Pair& other) const {
+        return key_ < other.key_;
+    }
+    bool operator==(const Pair& other) const {
+        return key_ == other.key_;
+    }
+
+    uint64_t hash() const {
+        // FIXME
+        return CityHash64((char*) key_.p_.bytes_,
+                          sizeof(key_.p_.bytes_));
+    }
+
+    Key key_;
+    Value value_;
+};
+
+template<class Keys, class Values, class Todo, class T>
+void dedup(Keys* seen_keys, Values* seen_values,
+           Todo* todo, T* new_begin, T* new_end) {
     std::vector<bool> discard(new_end - new_begin);
-    if (seen_states->size()) {
+    if (seen_keys->size()) {
         auto it = new_begin;
-        auto prev = *seen_states->begin();
-        for (const auto& st : *seen_states) {
-            if (st < prev) {
-                it = std::lower_bound(new_begin, new_end, st);
+        auto prev = *seen_keys->begin();
+        for (const auto& key : *seen_keys) {
+            if (key < prev) {
+                it = std::lower_bound(new_begin, new_end, key);
             }
-            while (it != new_end && *it < st) {
+            while (it != new_end && it->key_ < key) {
                 ++it;
             }
-            if (st == *it) {
+            if (key == it->key_) {
                 discard[it - new_begin] = true;
             }
-            prev = st;
+            prev = key;
         }
     }
 
-    seen_states->thaw();
+    seen_keys->thaw();
+    seen_values->thaw();
 
     for (int i = 0; i < discard.size(); ++i) {
         if (!discard[i]) {
-            seen_states->push_back(new_begin[i]);
-            todo->push_back(new_begin[i].a);
+            seen_keys->push_back(new_begin[i].key_);
+            seen_values->push_back(new_begin[i].value_);
+            todo->push_back(new_begin[i].key_);
         }
     }
 }
@@ -80,72 +117,80 @@ void sort_in_chunks(T* start, T* end, Cmp cmp) {
     }
 }
 
-template<class St,
+template<class Key, class Value,
          // 200M
          size_t kMemoryTargetBytes=200000000>
 class OutputState {
 public:
     explicit OutputState(int i) {
+        round_start_index_.push_back(0);
     }
 
     OutputState(const OutputState& other) = delete;
     void operator=(const OutputState& other) = delete;
 
     OutputState(OutputState&& other)
-        :  seen_states_(std::move(other.seen_states_)),
-           new_states_(std::move(other.new_states_)) {
-        seen_states_round_start_.push_back(0);
+        : keys_(std::move(other.keys_)),
+          values_(std::move(other.values_)),
+          new_pairs_(std::move(other.new_pairs_)),
+          round_start_index_(std::move(other.round_start_index_)),
+          round_end_index_(std::move(other.round_end_index_)) {
     }
 
-    void insert(St st) {
-        new_states_.push_back(st);
+    void insert(const Pair<Key, Value>& pair) {
+        new_pairs_.push_back(pair);
     }
 
     void flush() {
-        seen_states_round_start_.push_back(seen_states_.size());
-        seen_states_.freeze();
-        new_states_.freeze();
+        round_start_index_.push_back(keys_.size());
+        keys_.flush();
+        values_.flush();
+        new_pairs_.flush();
+    }
+
+    void map() {
+        keys_.freeze();
+        values_.freeze();
+        new_pairs_.snapshot();
     }
 
     void start_iteration() {
-        new_states_.reset();
-        seen_states_round_end_.push_back(seen_states_.size());
+        new_pairs_.reset();
+        round_end_index_.push_back(keys_.size());
     }
 
-    St* round_begin(int round) {
-        return seen_states_.begin() + seen_states_round_start_[round];
+    Key* round_begin(int round) {
+        return keys_.begin() + round_start_index_[round];
     }
 
-    St* round_end(int round) {
-        return seen_states_.begin() + seen_states_round_end_[round];
+    Key* round_end(int round) {
+        return keys_.begin() + round_end_index_[round];
     }
 
-    using SeenStates = file_backed_mmap_array<St, kMemoryTargetBytes/2>;
-    using NewStates = file_backed_mmap_array<St, kMemoryTargetBytes/2>;
+    const static size_t kInMemoryElems = kMemoryTargetBytes / (sizeof(Key) + sizeof(Value)) / 2;
+    using Keys = file_backed_mmap_array<Key, kInMemoryElems>;
+    using Values = file_backed_mmap_array<Value, kInMemoryElems>;
+    using NewPairs = file_backed_mmap_array<Pair<Key, Value>, kInMemoryElems>;
 
-    SeenStates& seen_states_mmap() {
-        return seen_states_;
-    }
+    Keys& keys() { return keys_; }
+    Values& values() { return values_; }
+    NewPairs& new_pairs() { return new_pairs_; }
 
-    NewStates& new_states_mmap() {
-        return new_states_;
-    }
-
-
-    SeenStates seen_states_;
-    NewStates new_states_;
-    std::vector<size_t> seen_states_round_start_;
-    std::vector<size_t> seen_states_round_end_;
+    Keys keys_;
+    Values values_;
+    NewPairs new_pairs_;
+    std::vector<size_t> round_start_index_;
+    std::vector<size_t> round_end_index_;
 };
 
-template<class T, size_t SZ>
-int reshard(std::vector<OutputState<T, SZ>>* outputs,
+template<class OutputState>
+int reshard(std::vector<OutputState>* outputs,
              int new_shards) {
     assert(outputs->empty());
     assert(!(new_shards & (new_shards - 1)));
 
     for (int i = 0; i < new_shards; ++i) {
-        outputs->emplace_back(OutputState<T, SZ>(i));
+        outputs->emplace_back(OutputState(i));
     }
 
     return new_shards - 1;
@@ -153,35 +198,19 @@ int reshard(std::vector<OutputState<T, SZ>>* outputs,
 
 template<class St, class Map>
 int search(St start_state, const Map& map) {
+    const size_t kTargetMemoryBytes = 2UL * 1024 * 1024 * 1024;
+    const int kShards = 16;
+
     using Packed = typename St::Packed;
-    St null_state;
+    using st_pair = Pair<Packed, uint8_t>;
+    using OutputState = OutputState<Packed,
+                                    uint8_t,
+                                    kTargetMemoryBytes / kShards>;
 
     // Just in case the starting state is invalid.
     start_state.process_gravity(map, 0);
 
-    struct st_pair {
-        st_pair() {
-        }
-
-        st_pair(const St& a, uint8_t parent_hash)
-            : a(a), parent_hash(parent_hash) {
-        }
-
-        bool operator<(const st_pair& other) const {
-            return a < other.a;
-        }
-        bool operator==(const st_pair& other) const {
-            return a == other.a;
-        }
-
-        uint64_t hash() const {
-            return CityHash64((char*) a.p_.bytes_,
-                              sizeof(a.p_.bytes_));
-        }
-
-        Packed a;
-        uint8_t parent_hash = 0;
-    };
+    St null_state;
 
     // BFS state
     std::vector<Packed> todo;
@@ -189,10 +218,8 @@ int search(St start_state, const Map& map) {
     st_pair win_state = st_pair(null_state, 0);
     bool win = false;
 
-    const size_t kTargetMemoryBytes = 3UL * 1024 * 1024 * 1024;
-    const int kShards = 16;
-    std::vector<OutputState<st_pair, kTargetMemoryBytes / kShards>> outputs;
-    int shard_mask = reshard<st_pair>(&outputs, kShards);
+    std::vector<OutputState> outputs;
+    int shard_mask = reshard<>(&outputs, kShards);
 
     printf("bits=%ld packed_bytes=%ld output_state=%ldMB\n",
            St::packed_width(),
@@ -203,12 +230,12 @@ int search(St start_state, const Map& map) {
         auto pair = st_pair(start_state, 0xfe);
         auto hash = pair.hash();;
         outputs[hash & shard_mask].insert(pair);
-        St(pair.a).print(map);
+        St(pair.key_).print(map);
     }
 
     size_t total_states = 0;
     size_t depth = 0;
-    double dedup_sort_s = 0, dedup_merge_s = 0,
+    double dedup_flush_s = 0, dedup_sort_s = 0, dedup_merge_s = 0,
         search_s = 0, print_s = 0;
     while (1) {
         // Empty the todo list
@@ -217,9 +244,20 @@ int search(St start_state, const Map& map) {
         size_t seen_states_size = 0;
         size_t new_states_size = 0;
         for (auto& output : outputs) {
+            MeasureTime<> timer(&dedup_flush_s);
             output.flush();
-            auto& new_states = output.new_states_mmap();
-            auto& seen_states = output.seen_states_mmap();
+        }
+
+        for (int i = 0; i < outputs.size(); ++i) {
+            auto& output = outputs[i];
+            {
+                MeasureTime<> timer(&dedup_flush_s);
+                output.map();
+            }
+
+            auto& new_states = output.new_pairs();
+            auto& seen_keys = output.keys();
+            auto& seen_values = output.values();
 
             total_states += new_states.size();
             new_states_size += new_states.size();
@@ -237,9 +275,10 @@ int search(St start_state, const Map& map) {
             // Build a new todo list from the entries in new_states not
             // contained in seen_states.
             MeasureTime<> timer(&dedup_merge_s);
-            dedup(&seen_states, &todo, new_states.begin(), new_end);
+            dedup(&seen_keys, &seen_values,
+                  &todo, new_states.begin(), new_end);
 
-            seen_states_size += seen_states.size();
+            seen_states_size += seen_keys.size();
             output.start_iteration();
         }
 
@@ -247,9 +286,9 @@ int search(St start_state, const Map& map) {
                depth++,
                seen_states_size, todo.size(),
                total_states, new_states_size);
-        printf("timing: dedup: %lfs+%lfs search: %lfs = total: %lfs\n",
-               dedup_sort_s, dedup_merge_s, search_s,
-               dedup_sort_s + dedup_merge_s + search_s);
+        printf("timing: dedup: %lfs+%lfs+%lfs search: %lfs = total: %lfs\n",
+               dedup_flush_s, dedup_sort_s, dedup_merge_s, search_s,
+               dedup_flush_s + dedup_sort_s + dedup_merge_s + search_s);
 
         if (win || todo.empty()) {
             break;
@@ -292,34 +331,38 @@ int search(St start_state, const Map& map) {
 
     if (win) {
         MeasureTime<> timer(&print_s);
-        St(win_state.a).print(map);
+        St(win_state.key_).print(map);
 
         st_pair target = win_state;
 
         for (auto& output : outputs) {
             output.flush();
+            output.map();
         }
 
         for (int i = depth - 1; i > 0; --i) {
-            auto h = target.parent_hash & shard_mask;
+            auto h = target.value_ & shard_mask;
             const auto begin = outputs[h].round_begin(i);
             const auto end = outputs[h].round_end(i);
             printf("Move %d\n", i);
             for (auto it = begin; it != end + 10; ++it) {
-                St st(it->a);
+                St st(*it);
                 if (st.do_valid_moves(map,
                                       [&target, &map](St new_state,
                                                       int si,
                                                       Direction dir) {
                                           new_state.canonicalize(map);
                                           Packed p(new_state);
-                                          if (p == target.a) {
+                                          if (p == target.key_) {
                                               return true;
                                           }
                                           return false;
                                       })) {
                     st.print(map);
-                    target = *it;
+                    const auto& value =
+                        *(outputs[h].values().begin() +
+                          (it - outputs[h].keys().begin()));
+                    target = st_pair(*it, value);
                     break;
                 }
             }
