@@ -309,7 +309,7 @@ int search(St start_state, const Map& map) {
                                            Direction dir) {
                                   new_state.canonicalize(map);
                                   st_pair pair(new_state,
-                                               parent_hash & 0x7f);
+                                               parent_hash & 0xff);
 
                                   auto hash = pair.hash();
                                   outputs[hash & shard_mask].insert(pair);
@@ -343,6 +343,10 @@ int search(St start_state, const Map& map) {
             const auto end = outputs[h].round_end(i);
             printf("Move %d\n", i);
             for (auto it = begin; it != end + 10; ++it) {
+                st_pair current(*it, 0);
+                if ((current.hash() & 0xff) != (target.value_ & 0xff)) {
+                    continue;
+                }
                 St st(*it);
                 if (st.do_valid_moves(map,
                                       [&target, &map](St new_state,
