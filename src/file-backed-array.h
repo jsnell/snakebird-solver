@@ -81,6 +81,11 @@ public:
         assert(frozen_);
         return array_ + size_;
     }
+    T& operator[](size_t index) {
+        assert(frozen_);
+        return array_[index];
+    }
+
     size_t size() const { return size_; }
 
     void push_back(const T& data) {
