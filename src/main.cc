@@ -6,10 +6,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
-#include <sparsehash/dense_hash_map>
-#include <sparsehash/sparse_hash_map>
 #include <third-party/cityhash/city.h>
-#include <unordered_map>
 #include <vector>
 
 #include <unistd.h>
