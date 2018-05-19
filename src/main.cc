@@ -350,6 +350,7 @@ int search(St start_state, const Map& map) {
     printf("%s\n",
            win ? "Win" : "No solution");
 
+    size_t total_bytes = 0;
     if (win) {
         MeasureTime<> timer(&print_s);
         St(win_state.key_).print(map);
@@ -359,6 +360,8 @@ int search(St start_state, const Map& map) {
         for (auto& output : outputs) {
             output.flush();
             output.map();
+            total_bytes += output.keys().size();
+            total_bytes += output.values().size();
         }
 
         for (int i = depth - 1; i > 0; --i) {
@@ -402,7 +405,8 @@ int search(St start_state, const Map& map) {
         }
     }
 
-    printf("%ld states, %ld moves\n", steps, depth);
+    printf("%ld states, %ld moves, %ld bytes\n", steps, depth,
+           total_bytes);
     printf("timing: dedup: %lfs search: %lfs print: %lfs= total: %lfs\n",
            dedup_sort_s + dedup_merge_s, search_s, print_s,
            dedup_sort_s + dedup_merge_s + search_s + print_s);
