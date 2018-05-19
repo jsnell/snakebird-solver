@@ -54,17 +54,34 @@ public:
     Value value_;
 };
 
-template<class Keys, class Values, class Todo, class T>
-void dedup(Keys* seen_keys, Values* seen_values,
-           Todo* todo, T* new_begin, T* new_end) {
+template<int Length>
+uint8_t* unpack_key_from_bytes(uint8_t* in,
+                               uint8_t prev[Length],
+                               uint8_t output[Length]) {
+    uint8_t n = *in++;
+    for (int i = 0; i < n; ++i, ++in) {
+        output[i] = *in ^ prev[i];
+    }
+
+    return in;
+}
+
+template<class Keys, class Values, class Todo, class K, class V>
+void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
+           Pair<K, V>* new_begin, Pair<K, V>* new_end) {
     std::vector<bool> discard(new_end - new_begin);
-    if (seen_keys->size()) {
+
+    for (int run = 0; run < seen_keys->runs(); ++run) {
+        auto runinfo = seen_keys->run(run);
+        auto keyit = seen_keys->begin() + runinfo.first;
+        auto end = seen_keys->begin() + runinfo.second;
+        // auto it = std::lower_bound(new_begin, new_end, key);
         auto it = new_begin;
-        auto prev = *seen_keys->begin();
-        for (const auto& key : *seen_keys) {
-            if (key < prev) {
-                it = std::lower_bound(new_begin, new_end, key);
-            }
+        K prev;
+        while (keyit < end) {
+            K key = prev;
+            keyit = unpack_key_from_bytes<sizeof(key.p_.bytes_)>
+                (keyit, prev.p_.bytes_, key.p_.bytes_);
             while (it != new_end && it->key_ < key) {
                 ++it;
             }
@@ -78,13 +95,34 @@ void dedup(Keys* seen_keys, Values* seen_values,
     seen_keys->thaw();
     seen_values->thaw();
 
+    seen_keys->start_run();
+    seen_values->start_run();
+    K prev;
     for (int i = 0; i < discard.size(); ++i) {
         if (!discard[i]) {
-            seen_keys->push_back(new_begin[i].key_);
+            // seen_keys->push_back(new_begin[i].key_);
+            const auto& key = new_begin[i].key_;
+            K out;
+            int n = 0;
+            for (int j = 0; j < sizeof(key.p_.bytes_); ++j) {
+                uint8_t diff = prev.p_.bytes_[j] ^ key.p_.bytes_[j];
+                out.p_.bytes_[j] = diff;
+                if (diff) {
+                    n = j + 1;
+                }
+            }
+            seen_keys->push_back(n);
+            for (int j = 0; j < n; ++j) {
+                seen_keys->push_back(out.p_.bytes_[j]);
+            }
+
+            prev = key;
             seen_values->push_back(new_begin[i].value_);
             todo->push_back(new_begin[i].key_);
         }
     }
+    seen_keys->end_run();
+    seen_values->end_run();
 }
 
 template<size_t chunk_bytes = 1000000000, class T, class Cmp>
@@ -120,7 +158,6 @@ template<class Key, class Value,
 class OutputState {
 public:
     explicit OutputState(int i) {
-        round_start_index_.push_back(0);
     }
 
     OutputState(const OutputState& other) = delete;
@@ -129,9 +166,7 @@ public:
     OutputState(OutputState&& other)
         : keys_(std::move(other.keys_)),
           values_(std::move(other.values_)),
-          new_pairs_(std::move(other.new_pairs_)),
-          round_start_index_(std::move(other.round_start_index_)),
-          round_end_index_(std::move(other.round_end_index_)) {
+          new_pairs_(std::move(other.new_pairs_)) {
     }
 
     void insert(const Pair<Key, Value>& pair) {
@@ -139,7 +174,6 @@ public:
     }
 
     void flush() {
-        round_start_index_.push_back(keys_.size());
         keys_.flush();
         values_.flush();
         new_pairs_.flush();
@@ -153,19 +187,11 @@ public:
 
     void start_iteration() {
         new_pairs_.reset();
-        round_end_index_.push_back(keys_.size());
-    }
-
-    Key* round_begin(int round) {
-        return keys_.begin() + round_start_index_[round];
-    }
-
-    Key* round_end(int round) {
-        return keys_.begin() + round_end_index_[round];
     }
 
     const static size_t kInMemoryElems = kMemoryTargetBytes / (sizeof(Key) + sizeof(Value)) / 2;
-    using Keys = file_backed_mmap_array<Key, kInMemoryElems>;
+    // using Keys = file_backed_mmap_array<Key, kInMemoryElems>;
+    using Keys = file_backed_mmap_array<uint8_t, kInMemoryElems>;
     using Values = file_backed_mmap_array<Value, kInMemoryElems>;
     using NewPairs = file_backed_mmap_array<Pair<Key, Value>, kInMemoryElems>;
 
@@ -176,8 +202,6 @@ public:
     Keys keys_;
     Values values_;
     NewPairs new_pairs_;
-    std::vector<size_t> round_start_index_;
-    std::vector<size_t> round_end_index_;
 };
 
 template<class OutputState>
@@ -225,7 +249,7 @@ int search(St start_state, const Map& map) {
 
     {
         auto pair = st_pair(start_state, 0xfe);
-        auto hash = pair.hash();;
+        auto hash = pair.hash();
         outputs[hash & shard_mask].insert(pair);
         St(pair.key_).print(map);
     }
@@ -274,8 +298,8 @@ int search(St start_state, const Map& map) {
             MeasureTime<> timer(&dedup_merge_s);
             dedup(&seen_keys, &seen_values,
                   &todo, new_states.begin(), new_end);
+            seen_states_size += seen_values.size();
 
-            seen_states_size += seen_keys.size();
             output.start_iteration();
         }
 
@@ -339,15 +363,25 @@ int search(St start_state, const Map& map) {
 
         for (int i = depth - 1; i > 0; --i) {
             auto h = target.value_ & shard_mask;
-            const auto begin = outputs[h].round_begin(i);
-            const auto end = outputs[h].round_end(i);
+            auto& seen_keys = outputs[h].keys();
+            auto& seen_values = outputs[h].values();
+            auto runinfo = seen_keys.run(i - 1);
+            const auto begin = &seen_keys[runinfo.first];
+            const auto end = &seen_keys[runinfo.second];
             printf("Move %d\n", i);
-            for (auto it = begin; it != end + 10; ++it) {
-                st_pair current(*it, 0);
+            Packed prev;
+            auto it = begin;
+            for (int j = 0; it != end; ++j) {
+                Packed key = prev;
+                it = unpack_key_from_bytes<sizeof(key.p_.bytes_)>(
+                    it, prev.p_.bytes_, key.p_.bytes_);
+                prev = key;
+
+                st_pair current(key, 0);
                 if ((current.hash() & 0xff) != (target.value_ & 0xff)) {
                     continue;
                 }
-                St st(*it);
+                St st(key);
                 if (st.do_valid_moves(map,
                                       [&target, &map](St new_state,
                                                       int si,
@@ -359,11 +393,9 @@ int search(St start_state, const Map& map) {
                                           }
                                           return false;
                                       })) {
+                    const auto& value = seen_values[seen_values.run(i - 1).first + j];
+                    target = st_pair(key, value);
                     st.print(map);
-                    const auto& value =
-                        *(outputs[h].values().begin() +
-                          (it - outputs[h].keys().begin()));
-                    target = st_pair(*it, value);
                     break;
                 }
             }
@@ -435,6 +467,7 @@ int search(St start_state, const Map& map) {
 int main() {
 #define EXPECT_EQ(wanted, actual)                                       \
     do {                                                                \
+        printf("Running %s\n", #actual);                                \
         auto tmp = actual;                                              \
         if (tmp != wanted) {                                            \
             fprintf(stderr, "Error: expected %s => %d, got %d\n", #actual, wanted, tmp); \

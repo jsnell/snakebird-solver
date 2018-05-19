@@ -127,6 +127,23 @@ public:
         buffer_.clear();
     }
 
+    void start_run() {
+        run_starts_.push_back(size_);
+    }
+
+    void end_run() {
+        run_ends_.push_back(size_);
+    }
+
+    std::pair<size_t, size_t> run(int i) const {
+        return std::make_pair(run_starts_[i],
+                              run_ends_[i]);
+    }
+
+    int runs() const {
+        return run_ends_.size();
+    }
+
 private:
     void maybe_map(int prot, int flags) {
         assert(!frozen_);
@@ -145,6 +162,8 @@ private:
         frozen_ = true;
     }
 
+    std::vector<size_t> run_starts_;
+    std::vector<size_t> run_ends_;
     std::vector<T> buffer_;
     bool frozen_ = false;
     size_t size_ = 0;
