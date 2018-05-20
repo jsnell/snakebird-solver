@@ -182,8 +182,14 @@ void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
 
 template<class T, class Cmp>
 T* sort_dedup(T* start, T* end, Cmp cmp) {
-    std::sort(start, end);
-    return std::unique(start, end);
+    auto copy = new T[std::distance(start, end)];
+    auto copy_end = copy + std::distance(start, end);
+    std::copy(start, end, copy);
+    std::sort(copy, copy_end);
+    copy_end = std::unique(copy, copy_end);
+    std::copy(copy, copy_end, start);
+    delete[] copy;
+    return start + std::distance(copy, copy_end);
 }
 
 template<class St, class Map>
