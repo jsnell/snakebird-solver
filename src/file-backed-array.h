@@ -30,6 +30,7 @@ public:
         buffer_ = std::move(other.buffer_);
         frozen_ = other.frozen_;
         size_ = other.size_;
+        capacity_ = other.capacity_;
         fd_ = other.fd_;
         array_ = other.array_;
         other.array_ = NULL;
@@ -42,7 +43,7 @@ public:
 
     void maybe_unmap(bool truncate) {
         if (fd_ >= 0 && array_) {
-            munmap((void*) array_, size_ * sizeof(T));
+            munmap((void*) array_, capacity_ * sizeof(T));
             if (truncate) {
                 ftruncate(fd_, 0);
             }
@@ -84,12 +85,31 @@ public:
         assert(frozen_);
         return array_ + size_;
     }
+
+    const T* begin() const {
+        assert(frozen_);
+        return array_;
+    }
+    const T* end() const {
+        assert(frozen_);
+        return array_ + size_;
+    }
+
     T& operator[](size_t index) {
         assert(frozen_);
         return array_[index];
     }
 
+    const T& operator[](size_t index) const {
+        assert(frozen_);
+        return array_[index];
+    }
+
     size_t size() const { return size_; }
+    size_t capacity() const {
+        assert(frozen_);
+        return capacity_;
+    }
 
     void push_back(const T& data) {
         assert(!frozen_);
@@ -109,8 +129,7 @@ public:
     }
 
     void snapshot() {
-        maybe_map(PROT_READ | PROT_WRITE,
-                  MAP_PRIVATE);
+        maybe_map(PROT_READ | PROT_WRITE, MAP_SHARED);
     }
 
     void thaw() {
@@ -147,6 +166,11 @@ public:
         return run_ends_.size();
     }
 
+    void resize(size_t new_size) {
+        assert(frozen_);
+        size_ = new_size;
+    }
+
 private:
     void maybe_map(int prot, int flags) {
         assert(!frozen_);
@@ -163,6 +187,7 @@ private:
             array_ = &buffer_[0];
         }
         frozen_ = true;
+        capacity_ = size_;
     }
 
     std::vector<size_t> run_starts_;
@@ -170,6 +195,7 @@ private:
     std::vector<T> buffer_;
     bool frozen_ = false;
     size_t size_ = 0;
+    size_t capacity_ = 0;
     int fd_ = -1;
     T* array_ = NULL;
 };
