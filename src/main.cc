@@ -180,40 +180,14 @@ void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
     seen_keys->end_run();
 }
 
-template<size_t ChunkElems = 1000000000, class T, class Cmp>
+template<class T, class Cmp>
 T* sort_dedup(T* start, T* end, Cmp cmp) {
-    if (std::distance(start, end) < ChunkElems) {
-        std::sort(start, end);
-        return std::unique(start, end);
-    } else {
-        T* mid = start + std::distance(start, end) / 2;
-        T* a_end = sort_dedup(start, mid, cmp);
-        T* b_end = sort_dedup(mid, end, cmp);
-        T* copy_end = std::copy(mid, b_end, a_end);
-        std::inplace_merge(start, a_end, copy_end);
-        return std::unique(start, copy_end);
-    }
-}
-
-template<class OutputState>
-int reshard(std::vector<OutputState>* outputs,
-             int new_shards) {
-    assert(outputs->empty());
-    assert(!(new_shards & (new_shards - 1)));
-
-    for (int i = 0; i < new_shards; ++i) {
-        outputs->emplace_back(OutputState(i));
-    }
-
-    return new_shards - 1;
+    std::sort(start, end);
+    return std::unique(start, end);
 }
 
 template<class St, class Map>
 int search(St start_state, const Map& map) {
-    const size_t kTargetMemoryBytes = 2UL * 1024 * 1024 * 1024;
-    const int kShards = 16;
-    const int shard_mask = kShards - 1;
-
     using Packed = typename St::Packed;
     using st_pair = Pair<Packed, uint8_t>;
 
@@ -234,17 +208,17 @@ int search(St start_state, const Map& map) {
     st_pair win_state = st_pair(null_state, 0);
     bool win = false;
 
-    std::vector<NewStates> outputs { kShards };
+    size_t shards = 1;
 
-    printf("bits=%ld packed_bytes=%ld output_state=%ldMB\n",
+    std::vector<NewStates> outputs { shards };
+
+    printf("bits=%ld packed_bytes=%ld\n",
            St::packed_width(),
-           sizeof(Packed),
-           kTargetMemoryBytes / kShards / 1000 / 1000);
+           sizeof(Packed));
 
     {
         auto pair = st_pair(start_state, 0xfe);
-        auto hash = pair.hash();
-        outputs[hash & shard_mask].push_back(pair);
+        outputs[0].push_back(st_pair(start_state, 0));
         St(pair.key_).print(map);
     }
 
@@ -283,7 +257,9 @@ int search(St start_state, const Map& map) {
         }
 
         file_backed_mmap_array<Pair<Packed, uint8_t>> all_new_states;
-        {
+        if (shards == 1) {
+            std::swap(outputs[0], all_new_states);
+        } else {
             MeasureTime<> timer(&dedup_merge_shards_s);
             MultiMerge<Pair<Packed, uint8_t>,
                        file_backed_mmap_array<Pair<Packed, uint8_t>>> merge_shards(&all_new_states);
@@ -305,6 +281,16 @@ int search(St start_state, const Map& map) {
                                    all_new_states);
             seen_states_size += seen_values.size();
             state_bytes += seen_keys.size();
+            all_new_states.reset();
+        }
+
+        if (new_states_size / shards > 100000000) {
+            shards *= 2;
+            outputs.resize(shards);
+        } else if (shards > 1 && new_states_size / shards < 10000000) {
+            shards /= 2;
+            outputs.resize(shards);
+            outputs.shrink_to_fit();
         }
 
         printf("depth: %ld unique: %ld, delta %ld (total: %ld, delta %ld), bytes: %ld\n",
@@ -335,7 +321,7 @@ int search(St start_state, const Map& map) {
 
             st.do_valid_moves(map,
                               [&depth, &outputs, &win, &map, &parent_hash,
-                               &shard_mask,
+                               &shards,
                                &win_state](St new_state,
                                            int si,
                                            Direction dir) {
@@ -344,7 +330,7 @@ int search(St start_state, const Map& map) {
                                                parent_hash & 0xff);
 
                                   auto hash = pair.hash();
-                                  outputs[hash & shard_mask].push_back(pair);
+                                  outputs[hash & (shards - 1)].push_back(pair);
                                   if (new_state.win()) {
                                       win_state = pair;
                                       win = true;
