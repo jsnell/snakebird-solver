@@ -8,7 +8,9 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -O3 -g3 -Wall -Werror -Wno-si
 
 add_executable(snakebird
   src/main.cc
-  src/third-party/cityhash/city.cc)
+  src/third-party/cityhash/city.cc
+  src/third-party/snappy/snappy.cc
+  src/third-party/snappy/snappy-sinksource.cc)
 
 enable_testing()
 # Usual workaround for the broken test build dependency handling in CMake.

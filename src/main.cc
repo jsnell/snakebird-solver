@@ -7,6 +7,8 @@
 #include <deque>
 #include <functional>
 #include <third-party/cityhash/city.h>
+#include <third-party/snappy/snappy.h>
+#include <third-party/snappy/snappy-sinksource.h>
 #include <vector>
 
 #include <unistd.h>
@@ -78,9 +80,13 @@ void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
 
     for (int run = 0; run < seen_keys->runs(); ++run) {
         auto runinfo = seen_keys->run(run);
-        auto keyit = seen_keys->begin() + runinfo.first;
-        auto end = seen_keys->begin() + runinfo.second;
-        // auto it = std::lower_bound(new_begin, new_end, key);
+        std::string uncompressed;
+        assert(snappy::Uncompress((char*) seen_keys->begin() + runinfo.first,
+                                  runinfo.second - runinfo.first,
+                                  &uncompressed));
+        uint8_t* keyit = (uint8_t*) uncompressed.data();
+        uint8_t* end = keyit + uncompressed.size();
+
         auto it = new_begin;
         K prev;
         while (keyit < end) {
@@ -97,12 +103,11 @@ void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
         }
     }
 
-    seen_keys->thaw();
     seen_values->thaw();
-
-    seen_keys->start_run();
     seen_values->start_run();
     K prev;
+
+    std::vector<uint8_t> delta_compressed;
     for (int i = 0; i < discard.size(); ++i) {
         if (!discard[i]) {
             const auto& key = new_begin[i].key_;
@@ -117,24 +122,45 @@ void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
                         n |= 1 << (kBytes - j - 1);
                     }
                 } else {
-                    seen_keys->push_back(key.p_.bytes_[j]);
+                    delta_compressed.push_back(key.p_.bytes_[j]);
                 }
             }
 
-            seen_keys->push_back(n);
+            delta_compressed.push_back(n);
             for (int j = std::max(0, kBytes - 8); j < kBytes; ++j) {
                 if (n & (1 << (kBytes - j - 1))) {
-                    seen_keys->push_back(out.p_.bytes_[j]);
+                    delta_compressed.push_back(out.p_.bytes_[j]);
                 }
             }
 
             prev = key;
+
             seen_values->push_back(new_begin[i].value_);
             todo->push_back(new_begin[i].key_);
         }
     }
-    seen_keys->end_run();
     seen_values->end_run();
+
+    snappy::ByteArraySource source((char*) &delta_compressed[0],
+                                   delta_compressed.size());
+    struct SnappySink : snappy::Sink {
+        SnappySink(Keys* out) : out(out) {
+        };
+
+        virtual void Append(const char* bytes, size_t n) override {
+            for (int i = 0; i < n; ++i) {
+                out->push_back(bytes[i]);
+            }
+        }
+
+        Keys* out;
+    };
+    SnappySink sink(seen_keys);
+
+    seen_keys->thaw();
+    seen_keys->start_run();
+    Compress(&source, &sink);
+    seen_keys->end_run();
 }
 
 template<size_t ChunkElems = 1000000000, class T, class Cmp>
@@ -268,6 +294,7 @@ int search(St start_state, const Map& map) {
             MeasureTime<> timer(&dedup_flush_s);
             output.flush();
         }
+        size_t state_bytes = 0;
 
         for (int i = 0; i < outputs.size(); ++i) {
             auto& output = outputs[i];
@@ -298,14 +325,16 @@ int search(St start_state, const Map& map) {
             dedup(&seen_keys, &seen_values,
                   &todo, new_states.begin(), new_end);
             seen_states_size += seen_values.size();
+            state_bytes += seen_keys.size();
 
             output.start_iteration();
         }
 
-        printf("depth: %ld unique:%ld, delta %ld (total: %ld, delta %ld)\n",
+        printf("depth: %ld unique: %ld, delta %ld (total: %ld, delta %ld), bytes: %ld\n",
                depth++,
                seen_states_size, todo.size(),
-               total_states, new_states_size);
+               total_states, new_states_size,
+               state_bytes);
         printf("timing: dedup: %lfs+%lfs+%lfs search: %lfs = total: %lfs\n",
                dedup_flush_s, dedup_sort_s, dedup_merge_s, search_s,
                dedup_flush_s + dedup_sort_s + dedup_merge_s + search_s);
