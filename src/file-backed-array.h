@@ -3,6 +3,8 @@
 #ifndef FILE_BACKED_ARRAY_H
 #define FILE_BACKED_ARRAY_H
 
+#include <cstdlib>
+
 template<class T,
          // 100M
          size_t kFlushThreshold = 100000000 / sizeof(T)>
@@ -58,9 +60,10 @@ public:
 
     void open() {
         assert(fd_ == -1);
-        fd_ = ::open("file-backed-tmp", O_CREAT | O_RDWR);
+        char* fname = strdup("file-backed-tmp-XXXXXX");
+        fd_ = mkstemp(fname);
         assert(fd_ >= 0);
-        unlink("file-backed-tmp");
+        unlink(fname);
     }
 
     void flush() {
