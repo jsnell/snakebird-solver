@@ -58,9 +58,14 @@ template<int Length>
 uint8_t* unpack_key_from_bytes(uint8_t* in,
                                uint8_t prev[Length],
                                uint8_t output[Length]) {
+    for (int i = 0; i < Length - 8; ++i) {
+        output[i] = *in++;
+    }
     uint8_t n = *in++;
-    for (int i = 0; i < n; ++i, ++in) {
-        output[i] = *in ^ prev[i];
+    for (int i = std::max(0, Length - 8); i < Length; ++i) {
+        if (n & (1 << (Length - i - 1))) {
+            output[i] = *in++ ^ prev[i];
+        }
     }
 
     return in;
@@ -100,20 +105,27 @@ void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
     K prev;
     for (int i = 0; i < discard.size(); ++i) {
         if (!discard[i]) {
-            // seen_keys->push_back(new_begin[i].key_);
             const auto& key = new_begin[i].key_;
             K out;
             int n = 0;
-            for (int j = 0; j < sizeof(key.p_.bytes_); ++j) {
-                uint8_t diff = prev.p_.bytes_[j] ^ key.p_.bytes_[j];
-                out.p_.bytes_[j] = diff;
-                if (diff) {
-                    n = j + 1;
+            const int kBytes = sizeof(key.p_.bytes_);
+            for (int j = 0; j < kBytes; ++j) {
+                if (j >= kBytes - 8) {
+                    uint8_t diff = prev.p_.bytes_[j] ^ key.p_.bytes_[j];
+                    out.p_.bytes_[j] = diff;
+                    if (diff) {
+                        n |= 1 << (kBytes - j - 1);
+                    }
+                } else {
+                    seen_keys->push_back(key.p_.bytes_[j]);
                 }
             }
+
             seen_keys->push_back(n);
-            for (int j = 0; j < n; ++j) {
-                seen_keys->push_back(out.p_.bytes_[j]);
+            for (int j = std::max(0, kBytes - 8); j < kBytes; ++j) {
+                if (n & (1 << (kBytes - j - 1))) {
+                    seen_keys->push_back(out.p_.bytes_[j]);
+                }
             }
 
             prev = key;
