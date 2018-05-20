@@ -137,30 +137,18 @@ void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
     seen_values->end_run();
 }
 
-template<size_t chunk_bytes = 1000000000, class T, class Cmp>
-void sort_in_chunks(T* start, T* end, Cmp cmp) {
-    size_t elem_size = sizeof(*start);
-    size_t chunk_elems = chunk_bytes / elem_size;
-    for (T* s = start; s < end; ) {
-        size_t actual_elems = std::min(chunk_elems, (size_t) (end - s));
-        T* copy_s = new T[actual_elems];
-        T* e = s + actual_elems;
-        T* copy_e = copy_s + actual_elems;
-        std::copy(s, e, copy_s);
-        std::sort(copy_s, copy_e, cmp);
-        std::copy(copy_s, copy_e, s);
-        s = e;
-        delete[] copy_s;
-    }
-    size_t merge_elems = chunk_elems;
-    while (merge_elems < end - start) {
-        for (T* s = start; s + merge_elems < end; ) {
-            T* m = s + merge_elems;
-            T* e = m + std::min(merge_elems, (size_t) (end - m));
-            std::inplace_merge(s, m, e, cmp);
-            s = e;
-        }
-        merge_elems *= 2;
+template<size_t ChunkElems = 1000000000, class T, class Cmp>
+T* sort_dedup(T* start, T* end, Cmp cmp) {
+    if (std::distance(start, end) < ChunkElems) {
+        std::sort(start, end);
+        return std::unique(start, end);
+    } else {
+        T* mid = start + std::distance(start, end) / 2;
+        T* a_end = sort_dedup(start, mid, cmp);
+        T* b_end = sort_dedup(mid, end, cmp);
+        T* copy_end = std::copy(mid, b_end, a_end);
+        std::inplace_merge(start, a_end, copy_end);
+        return std::unique(start, copy_end);
     }
 }
 
@@ -300,9 +288,8 @@ int search(St start_state, const Map& map) {
                 // Sort and dedup just new_states
                 MeasureTime<> timer(&dedup_sort_s);
                 auto cmp = [](const st_pair& a, const st_pair &b) { return a < b;};
-                sort_in_chunks(new_states.begin(), new_states.end(), cmp);
-
-                new_end = std::unique(new_states.begin(), new_states.end());
+                new_end =
+                    sort_dedup(new_states.begin(), new_states.end(), cmp);
             }
 
             // Build a new todo list from the entries in new_states not
