@@ -6,16 +6,17 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <queue>
 #include <third-party/cityhash/city.h>
 #include <third-party/snappy/snappy.h>
 #include <third-party/snappy/snappy-sinksource.h>
 #include <vector>
 
-#include <unistd.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/mman.h>
-#include <fcntl.h>
+#include <unistd.h>
 
 #include "bit-packer.h"
 #include "file-backed-array.h"
@@ -47,7 +48,6 @@ public:
     }
 
     uint64_t hash() const {
-        // FIXME
         return CityHash64((char*) key_.p_.bytes_,
                           sizeof(key_.p_.bytes_));
     }
@@ -57,86 +57,103 @@ public:
 };
 
 template<int Length>
-uint8_t* unpack_key_from_bytes(uint8_t* in,
-                               uint8_t prev[Length],
-                               uint8_t output[Length]) {
-    for (int i = 0; i < Length - 8; ++i) {
-        output[i] = *in++;
+class SortedStructDecompressor {
+public:
+    SortedStructDecompressor(uint8_t* begin, uint8_t* end) {
+        snappy::Uncompress((char*) begin, std::distance(begin, end),
+                           &uncompressed_);
+        it_ = (const uint8_t*) uncompressed_.data();
+        end_ = it_ + uncompressed_.size();
     }
-    uint8_t n = *in++;
-    for (int i = std::max(0, Length - 8); i < Length; ++i) {
-        if (n & (1 << (Length - i - 1))) {
-            output[i] = *in++ ^ prev[i];
+
+    bool unpack(uint8_t value[Length]) {
+        if (it_ == end_) {
+            return false;
+        }
+        memcpy(value, prev_, Length);
+        unpack_internal(prev_, value);
+        memcpy(prev_, value, Length);
+
+        return true;
+    }
+
+private:
+    void unpack_internal(uint8_t prev[Length],
+                         uint8_t output[Length]) {
+        uint64_t n = 0;
+        for (int i = 0; i < Length; i += 8) {
+            uint64_t byte = *it_++;
+            n |= byte << i;
+        }
+        for (int i = 0; i < Length; ++i) {
+            if (n & (1 << i)) {
+                output[i] = *it_++ ^ prev[i];
+            }
         }
     }
 
-    return in;
-}
+    std::string uncompressed_;
+    uint8_t prev_[Length] = { 0 };
+    const uint8_t* it_;
+    const uint8_t* end_;
+};
 
-template<class Keys, class Values, class Todo, class K, class V>
+template<class K, class V,
+         class Keys, class Values, class Todo, class NewStates>
 void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
-           Pair<K, V>* new_begin, Pair<K, V>* new_end) {
-    std::vector<bool> discard(new_end - new_begin);
+           const NewStates& new_states) {
+    std::vector<bool> discard(new_states.size());
 
+    seen_keys->freeze();
     for (int run = 0; run < seen_keys->runs(); ++run) {
         auto runinfo = seen_keys->run(run);
-        std::string uncompressed;
-        assert(snappy::Uncompress((char*) seen_keys->begin() + runinfo.first,
-                                  runinfo.second - runinfo.first,
-                                  &uncompressed));
-        uint8_t* keyit = (uint8_t*) uncompressed.data();
-        uint8_t* end = keyit + uncompressed.size();
+        SortedStructDecompressor<sizeof(K::p_.bytes_)> stream(
+            seen_keys->begin() + runinfo.first,
+            seen_keys->begin() + runinfo.second);
+        auto it = new_states.begin();
 
-        auto it = new_begin;
-        K prev;
-        while (keyit < end) {
-            K key = prev;
-            keyit = unpack_key_from_bytes<sizeof(key.p_.bytes_)>
-                (keyit, prev.p_.bytes_, key.p_.bytes_);
-            while (it != new_end && it->key_ < key) {
+        K key;
+        while (stream.unpack(key.p_.bytes_)) {
+            while (it != new_states.end() && it->key_ < key) {
                 ++it;
             }
             if (key == it->key_) {
-                discard[it - new_begin] = true;
+                discard[it - new_states.begin()] = true;
             }
-            prev = key;
         }
     }
 
-    seen_values->thaw();
     seen_values->start_run();
     K prev;
 
     std::vector<uint8_t> delta_compressed;
     for (int i = 0; i < discard.size(); ++i) {
         if (!discard[i]) {
-            const auto& key = new_begin[i].key_;
+            const auto& key = new_states[i].key_;
             K out;
-            int n = 0;
+            uint64_t n = 0;
             const int kBytes = sizeof(key.p_.bytes_);
             for (int j = 0; j < kBytes; ++j) {
-                if (j >= kBytes - 8) {
-                    uint8_t diff = prev.p_.bytes_[j] ^ key.p_.bytes_[j];
-                    out.p_.bytes_[j] = diff;
-                    if (diff) {
-                        n |= 1 << (kBytes - j - 1);
-                    }
-                } else {
-                    delta_compressed.push_back(key.p_.bytes_[j]);
+                uint8_t diff = prev.p_.bytes_[j] ^ key.p_.bytes_[j];
+                out.p_.bytes_[j] = diff;
+                if (diff) {
+                    n |= 1 << j;
                 }
             }
 
-            delta_compressed.push_back(n);
-            for (int j = std::max(0, kBytes - 8); j < kBytes; ++j) {
-                if (n & (1 << (kBytes - j - 1))) {
+            for (int i = 0; i < kBytes; i += 8) {
+                delta_compressed.push_back(n >> i);
+            }
+            for (int j = 0; j < kBytes; ++j) {
+                if (n & (1 << j)) {
                     delta_compressed.push_back(out.p_.bytes_[j]);
                 }
             }
 
             prev = key;
 
-            seen_values->push_back(new_begin[i].value_);
-            todo->push_back(new_begin[i].key_);
+            seen_values->push_back(new_states[i].value_);
+            todo->push_back(new_states[i].key_);
         }
     }
     seen_values->end_run();
@@ -178,58 +195,6 @@ T* sort_dedup(T* start, T* end, Cmp cmp) {
     }
 }
 
-template<class Key, class Value,
-         // 200M
-         size_t kMemoryTargetBytes=200000000>
-class OutputState {
-public:
-    explicit OutputState(int i) {
-    }
-
-    OutputState(const OutputState& other) = delete;
-    void operator=(const OutputState& other) = delete;
-
-    OutputState(OutputState&& other)
-        : keys_(std::move(other.keys_)),
-          values_(std::move(other.values_)),
-          new_pairs_(std::move(other.new_pairs_)) {
-    }
-
-    void insert(const Pair<Key, Value>& pair) {
-        new_pairs_.push_back(pair);
-    }
-
-    void flush() {
-        keys_.flush();
-        values_.flush();
-        new_pairs_.flush();
-    }
-
-    void map() {
-        keys_.freeze();
-        values_.freeze();
-        new_pairs_.snapshot();
-    }
-
-    void start_iteration() {
-        new_pairs_.reset();
-    }
-
-    const static size_t kInMemoryElems = kMemoryTargetBytes / (sizeof(Key) + sizeof(Value)) / 2;
-    // using Keys = file_backed_mmap_array<Key, kInMemoryElems>;
-    using Keys = file_backed_mmap_array<uint8_t, kInMemoryElems>;
-    using Values = file_backed_mmap_array<Value, kInMemoryElems>;
-    using NewPairs = file_backed_mmap_array<Pair<Key, Value>, kInMemoryElems>;
-
-    Keys& keys() { return keys_; }
-    Values& values() { return values_; }
-    NewPairs& new_pairs() { return new_pairs_; }
-
-    Keys keys_;
-    Values values_;
-    NewPairs new_pairs_;
-};
-
 template<class OutputState>
 int reshard(std::vector<OutputState>* outputs,
              int new_shards) {
@@ -247,12 +212,14 @@ template<class St, class Map>
 int search(St start_state, const Map& map) {
     const size_t kTargetMemoryBytes = 2UL * 1024 * 1024 * 1024;
     const int kShards = 16;
+    const int shard_mask = kShards - 1;
 
     using Packed = typename St::Packed;
     using st_pair = Pair<Packed, uint8_t>;
-    using OutputState = OutputState<Packed,
-                                    uint8_t,
-                                    kTargetMemoryBytes / kShards>;
+
+    using Keys = file_backed_mmap_array<uint8_t>;
+    using Values = file_backed_mmap_array<uint8_t>;
+    using NewStates = file_backed_mmap_array<Pair<Packed, uint8_t>>;
 
     // Just in case the starting state is invalid.
     start_state.process_gravity(map, 0);
@@ -260,13 +227,14 @@ int search(St start_state, const Map& map) {
     St null_state;
 
     // BFS state
+    Keys seen_keys;
+    Values seen_values;
     std::vector<Packed> todo;
     size_t steps = 0;
     st_pair win_state = st_pair(null_state, 0);
     bool win = false;
 
-    std::vector<OutputState> outputs;
-    int shard_mask = reshard<>(&outputs, kShards);
+    std::vector<NewStates> outputs { kShards };
 
     printf("bits=%ld packed_bytes=%ld output_state=%ldMB\n",
            St::packed_width(),
@@ -276,14 +244,14 @@ int search(St start_state, const Map& map) {
     {
         auto pair = st_pair(start_state, 0xfe);
         auto hash = pair.hash();
-        outputs[hash & shard_mask].insert(pair);
+        outputs[hash & shard_mask].push_back(pair);
         St(pair.key_).print(map);
     }
 
     size_t total_states = 0;
     size_t depth = 0;
-    double dedup_flush_s = 0, dedup_sort_s = 0, dedup_merge_s = 0,
-        search_s = 0, print_s = 0;
+    double dedup_flush_s = 0, dedup_sort_s = 0, dedup_merge_shards_s = 0,
+        dedup_merge_s = 0, search_s = 0, print_s = 0;
     while (1) {
         // Empty the todo list
         todo.clear();
@@ -296,38 +264,47 @@ int search(St start_state, const Map& map) {
         }
         size_t state_bytes = 0;
 
-        for (int i = 0; i < outputs.size(); ++i) {
-            auto& output = outputs[i];
+        for (auto& new_states : outputs) {
             {
                 MeasureTime<> timer(&dedup_flush_s);
-                output.map();
+                new_states.snapshot();
             }
-
-            auto& new_states = output.new_pairs();
-            auto& seen_keys = output.keys();
-            auto& seen_values = output.values();
 
             total_states += new_states.size();
             new_states_size += new_states.size();
 
             st_pair* new_end = NULL;
-            {
-                // Sort and dedup just new_states
-                MeasureTime<> timer(&dedup_sort_s);
-                auto cmp = [](const st_pair& a, const st_pair &b) { return a < b;};
-                new_end =
-                    sort_dedup(new_states.begin(), new_states.end(), cmp);
-            }
 
+            // Sort and dedup the shard.
+            MeasureTime<> timer(&dedup_sort_s);
+            auto cmp = [](const st_pair& a, const st_pair &b) { return a < b;};
+            new_end = sort_dedup(new_states.begin(), new_states.end(), cmp);
+            new_states.resize(new_end - new_states.begin());
+        }
+
+        file_backed_mmap_array<Pair<Packed, uint8_t>> all_new_states;
+        {
+            MeasureTime<> timer(&dedup_merge_shards_s);
+            MultiMerge<Pair<Packed, uint8_t>,
+                       file_backed_mmap_array<Pair<Packed, uint8_t>>> merge_shards(&all_new_states);
+            for (auto& o : outputs) {
+                merge_shards.add_input_source(o.begin(), o.end());
+            }
+            merge_shards.merge();
+            for (auto& o : outputs) {
+                o.reset();
+            }
+            all_new_states.freeze();
+        }
+
+        {
             // Build a new todo list from the entries in new_states not
             // contained in seen_states.
             MeasureTime<> timer(&dedup_merge_s);
-            dedup(&seen_keys, &seen_values,
-                  &todo, new_states.begin(), new_end);
+            dedup<Packed, uint8_t>(&seen_keys, &seen_values, &todo,
+                                   all_new_states);
             seen_states_size += seen_values.size();
             state_bytes += seen_keys.size();
-
-            output.start_iteration();
         }
 
         printf("depth: %ld unique: %ld, delta %ld (total: %ld, delta %ld), bytes: %ld\n",
@@ -335,9 +312,12 @@ int search(St start_state, const Map& map) {
                seen_states_size, todo.size(),
                total_states, new_states_size,
                state_bytes);
-        printf("timing: dedup: %lfs+%lfs+%lfs search: %lfs = total: %lfs\n",
-               dedup_flush_s, dedup_sort_s, dedup_merge_s, search_s,
-               dedup_flush_s + dedup_sort_s + dedup_merge_s + search_s);
+        printf("timing: dedup: %lfs+%lfs+%lfs+%lfs search: %lfs = total: %lfs\n",
+               dedup_flush_s, dedup_sort_s, dedup_merge_shards_s,
+               dedup_merge_s,
+               search_s,
+               dedup_flush_s + dedup_sort_s + dedup_merge_shards_s +
+               dedup_merge_s + search_s);
 
         if (win || todo.empty()) {
             break;
@@ -364,7 +344,7 @@ int search(St start_state, const Map& map) {
                                                parent_hash & 0xff);
 
                                   auto hash = pair.hash();
-                                  outputs[hash & shard_mask].insert(pair);
+                                  outputs[hash & shard_mask].push_back(pair);
                                   if (new_state.win()) {
                                       win_state = pair;
                                       win = true;
@@ -385,29 +365,20 @@ int search(St start_state, const Map& map) {
 
         st_pair target = win_state;
 
-        for (auto& output : outputs) {
-            output.flush();
-            output.map();
-            total_bytes += output.keys().size();
-            total_bytes += output.values().size();
-        }
+        seen_keys.freeze();
+        seen_values.freeze();
+        total_bytes += seen_keys.size();
+        total_bytes += seen_values.size();
 
         for (int i = depth - 1; i > 0; --i) {
-            auto h = target.value_ & shard_mask;
-            auto& seen_keys = outputs[h].keys();
-            auto& seen_values = outputs[h].values();
             auto runinfo = seen_keys.run(i - 1);
-            const auto begin = &seen_keys[runinfo.first];
-            const auto end = &seen_keys[runinfo.second];
+            SortedStructDecompressor<sizeof(Packed::p_.bytes_)> stream(
+                seen_keys.begin() + runinfo.first,
+                seen_keys.begin() + runinfo.second);
             printf("Move %d\n", i);
-            Packed prev;
-            auto it = begin;
-            for (int j = 0; it != end; ++j) {
-                Packed key = prev;
-                it = unpack_key_from_bytes<sizeof(key.p_.bytes_)>(
-                    it, prev.p_.bytes_, key.p_.bytes_);
-                prev = key;
 
+            Packed key;
+            for (int j = 0; stream.unpack(key.p_.bytes_); ++j) {
                 st_pair current(key, 0);
                 if ((current.hash() & 0xff) != (target.value_ & 0xff)) {
                     continue;
@@ -436,8 +407,10 @@ int search(St start_state, const Map& map) {
     printf("%ld states, %ld moves, %ld bytes\n", steps, depth,
            total_bytes);
     printf("timing: dedup: %lfs search: %lfs print: %lfs= total: %lfs\n",
-           dedup_sort_s + dedup_merge_s, search_s, print_s,
-           dedup_sort_s + dedup_merge_s + search_s + print_s);
+           dedup_sort_s + dedup_merge_shards_s + dedup_merge_s,
+           search_s, print_s,
+           dedup_sort_s + dedup_merge_shards_s + dedup_merge_s +
+           search_s + print_s);
 
     return win ? depth - 1 : 0;
 }
