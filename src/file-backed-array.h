@@ -158,6 +158,8 @@ public:
         maybe_unmap(true);
         size_ = 0;
         buffer_.clear();
+        run_starts_.clear();
+        run_ends_.clear();
     }
 
     void start_run() {
