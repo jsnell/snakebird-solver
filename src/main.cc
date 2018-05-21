@@ -54,7 +54,7 @@ size_t dedup(Keys* seen_keys, Values* seen_values,
              const Values &new_values) {
     std::vector<bool> discard(new_values.size());
     struct StreamReader {
-        StreamReader(int i, uint8_t* begin, uint8_t* end)
+        StreamReader(int i, const uint8_t* begin, const uint8_t* end)
             : i_(i), stream_(begin, end) {
             next();
         }
@@ -91,52 +91,80 @@ size_t dedup(Keys* seen_keys, Values* seen_values,
         }
     };
 
-    std::priority_queue<StreamReader*,
-                        std::vector<StreamReader*>,
-                        Cmp> seen_keys_streams;
-    for (int run = 0; run < seen_keys->runs(); ++run) {
-        auto runinfo = seen_keys->run(run);
-        if (runinfo.first != runinfo.second) {
-            seen_keys_streams.push(new StreamReader(
-                                       run,
-                                       seen_keys->begin() + runinfo.first,
-                                       seen_keys->begin() + runinfo.second));
-        }
-    }
-
-    {
-        SortedStructDecompressor<sizeof(K::p_.bytes_), false> new_stream(
-            new_keys.begin(), new_keys.end());
-
-        K nkey;
-        if (new_stream.unpack(nkey.p_.bytes_)) {
-            size_t i = 0;
-            while (!seen_keys_streams.empty()) {
-                auto top = seen_keys_streams.top();
-                seen_keys_streams.pop();
-                const K& key = top->value();
-                while (nkey < key) {
-                    if (!new_stream.unpack(nkey.p_.bytes_)) {
-                        while (!seen_keys_streams.empty()) {
-                            delete seen_keys_streams.top();
-                            seen_keys_streams.pop();
-                        }
-                        goto done;
-                    }
-                    ++i;
-                }
-                if (key == nkey) {
-                    discard[i] = true;
-                }
-                if (top->next()) {
-                    seen_keys_streams.push(top);
-                } else {
-                    delete top;
+    struct StreamMultiplexer {
+        StreamMultiplexer(const Keys& keys) {
+            for (int run = 0; run < keys.runs(); ++run) {
+                auto runinfo = keys.run(run);
+                if (runinfo.first != runinfo.second) {
+                    streams_.push(new StreamReader(
+                                      run,
+                                      keys.begin() + runinfo.first,
+                                      keys.begin() + runinfo.second));
                 }
             }
-        done:
-            ;
         }
+
+        ~StreamMultiplexer() {
+            while (!streams_.empty()) {
+                delete streams_.top();
+                streams_.pop();
+            }
+        }
+
+        bool next() {
+            if (streams_.empty()) {
+                return false;
+            }
+
+            auto top_stream = streams_.top();
+            K value = top_stream->value();
+            streams_.pop();
+            if (top_stream->next()) {
+                streams_.push(top_stream);
+            } else {
+                delete top_stream;
+            }
+
+            if (value == top_) {
+                return next();
+            }
+
+            top_ = value;
+            return true;
+        }
+
+        const K& value() const {
+            return top_;
+        }
+
+    private:
+        K top_;
+        bool empty_ = false;
+
+        std::priority_queue<StreamReader*,
+                            std::vector<StreamReader*>,
+                            Cmp> streams_;
+    };
+
+    if (new_keys.size()) {
+        StreamMultiplexer seen_keys_stream { *seen_keys };
+        StreamMultiplexer new_keys_stream { new_keys };
+        new_keys_stream.next();
+
+        size_t i = 0;
+        while (seen_keys_stream.next()) {
+            while (new_keys_stream.value() < seen_keys_stream.value()) {
+                if (!new_keys_stream.next()) {
+                    goto done;
+                }
+                ++i;
+            }
+            if (new_keys_stream.value() == seen_keys_stream.value()) {
+                discard[i] = true;
+            }
+        }
+    done:
+        ;
     }
 
     SortedStructCompressor<sizeof(K::p_.bytes_),
@@ -148,14 +176,11 @@ size_t dedup(Keys* seen_keys, Values* seen_values,
     seen_keys->start_run();
     seen_values->start_run();
 
-    SortedStructDecompressor<sizeof(K::p_.bytes_), false> new_stream(
-        new_keys.begin(), new_keys.end());
-    K nkey;
-    for (int i = 0; i < discard.size(); ++i) {
-        new_stream.unpack(nkey.p_.bytes_);
+    StreamMultiplexer new_keys_stream { new_keys };
+    for (int i = 0; new_keys_stream.next(); ++i) {
         if (!discard[i]) {
             ++count;
-            compress.pack(nkey.p_.bytes_);
+            compress.pack(new_keys_stream.value().p_.bytes_);
             seen_values->push_back(new_values[i]);
         }
     }
@@ -168,16 +193,29 @@ size_t dedup(Keys* seen_keys, Values* seen_values,
     return count;
 }
 
-template<class T>
-T* sort_dedup(T* start, T* end) {
-    auto copy = new T[std::distance(start, end)];
-    auto copy_end = copy + std::distance(start, end);
-    std::copy(start, end, copy);
-    std::sort(copy, copy_end);
-    copy_end = std::unique(copy, copy_end);
-    std::copy(copy, copy_end, start);
-    delete[] copy;
-    return start + std::distance(copy, copy_end);
+template<class Key, class Pairs, class Keys, class Values>
+void pack_pairs(Pairs* new_states, Keys* new_keys, Values* new_values) {
+    std::sort(new_states->begin(), new_states->end());
+    Key prev;
+
+    new_keys->start_run();
+    new_values->start_run();
+    SortedStructCompressor<sizeof(Key::p_.bytes_),
+                           false,
+                           Keys> compress { new_keys };
+    for (const auto& pair : *new_states) {
+        if (pair.key_ == prev) {
+            continue;
+        }
+
+        compress.pack(pair.key_.p_.bytes_);
+        new_values->push_back(pair.value_);
+        prev = pair.key_;
+    }
+    new_keys->end_run();
+    new_values->end_run();
+
+    new_states->clear();
 }
 
 template<class St, class Map>
@@ -187,7 +225,7 @@ int search(St start_state, const Map& map) {
 
     using Keys = file_backed_mmap_array<uint8_t>;
     using Values = file_backed_mmap_array<uint8_t>;
-    using NewStates = file_backed_mmap_array<st_pair>;
+    using NewStates = std::vector<st_pair>;
 
     // Just in case the starting state is invalid.
     start_state.process_gravity(map, 0);
@@ -197,80 +235,42 @@ int search(St start_state, const Map& map) {
     // BFS state
     Keys seen_keys;
     Values seen_values;
+    Keys new_keys;
+    Values new_values;
+    NewStates new_states;
+
     size_t steps = 0;
     st_pair win_state = st_pair(null_state, 0);
     bool win = false;
-
-    size_t shards = 1;
-
-    std::vector<NewStates> outputs { shards };
 
     printf("bits=%ld packed_bytes=%ld\n",
            St::packed_width(),
            sizeof(Packed));
 
     {
-        auto pair = st_pair(start_state, 0xfe);
-        outputs[0].push_back(st_pair(start_state, 0));
+        auto pair = st_pair(start_state, 0);
+        new_states.push_back(pair);
         St(pair.key_).print(map);
     }
     seen_keys.freeze();
 
     size_t total_states = 0;
     size_t depth = 0;
-    double dedup_flush_s = 0, dedup_sort_s = 0, dedup_merge_shards_s = 0,
+    double dedup_flush_s = 0, dedup_sort_s = 0,
         dedup_merge_s = 0, search_s = 0, print_s = 0;
     while (1) {
         size_t seen_states_size = 0;
         size_t new_states_size = 0;
-        for (auto& output : outputs) {
-            MeasureTime<> timer(&dedup_flush_s);
-            output.flush();
-        }
-        size_t state_bytes = 0;
 
-        for (auto& new_states : outputs) {
-            printf(","); fflush(stdout);
-            {
-                MeasureTime<> timer(&dedup_flush_s);
-                new_states.snapshot();
-            }
-
-            total_states += new_states.size();
-            new_states_size += new_states.size();
-
-            st_pair* new_end = NULL;
-
-            // Sort and dedup the shard.
-            MeasureTime<> timer(&dedup_sort_s);
-            new_end = sort_dedup(new_states.begin(), new_states.end());
-            new_states.resize(new_end - new_states.begin());
-        }
-
-        Keys new_keys;
-        Values new_values;
+        total_states += new_states.size();
+        new_states_size += new_states.size();
         {
-            printf(";"); fflush(stdout);
-            MeasureTime<> timer(&dedup_merge_shards_s);
-            SortedStructCompressor<sizeof(Packed::p_.bytes_),
-                                   false,
-                                   Keys> compress { &new_keys };
-            MultiMerge<st_pair> merge_shards(
-                [&compress, &new_values] (const st_pair& pair) {
-                    compress.pack(pair.key_.p_.bytes_);
-                    new_values.push_back(pair.value_);
-                });
-            for (auto& o : outputs) {
-                merge_shards.add_input_source(o.begin(), o.end());
-            }
-            merge_shards.merge();
-            for (auto& o : outputs) {
-                o.reset();
-            }
-            compress.write();
+            MeasureTime<> timer(&dedup_flush_s);
+            pack_pairs<Packed>(&new_states, &new_keys, &new_values);
             new_keys.freeze();
             new_values.freeze();
         }
+        size_t state_bytes = 0;
 
         size_t new_unique = 0;
         {
@@ -285,26 +285,15 @@ int search(St start_state, const Map& map) {
             new_values.reset();
         }
 
-        if (new_states_size / shards > 100000000) {
-            shards *= 2;
-            outputs.resize(shards);
-        } else if (shards > 1 && new_states_size / shards < 10000000) {
-            shards /= 2;
-            outputs.resize(shards);
-            outputs.shrink_to_fit();
-        }
-
         printf("depth: %ld unique: %ld, delta %ld (total: %ld, delta %ld), bytes: %ld\n",
                depth++,
                seen_states_size, new_unique,
                total_states, new_states_size,
                state_bytes);
-        printf("timing: dedup: %lfs+%lfs+%lfs+%lfs search: %lfs = total: %lfs\n",
-               dedup_flush_s, dedup_sort_s, dedup_merge_shards_s,
-               dedup_merge_s,
-               search_s,
-               dedup_flush_s + dedup_sort_s + dedup_merge_shards_s +
-               dedup_merge_s + search_s);
+        printf("timing: dedup: %lfs+%lfs+%lfs search: %lfs = total: %lfs\n",
+               dedup_flush_s, dedup_sort_s, dedup_merge_s,
+               search_s - dedup_sort_s,
+               dedup_flush_s + dedup_merge_s + search_s);
 
         if (win || !new_unique) {
             break;
@@ -328,17 +317,15 @@ int search(St start_state, const Map& map) {
             auto parent_hash = st_pair(packed, 0).hash();
 
             st.do_valid_moves(map,
-                              [&depth, &outputs, &win, &map, &parent_hash,
-                               &shards,
+                              [&depth, &new_states,
+                               &win, &map, &parent_hash,
                                &win_state](St new_state,
                                            int si,
                                            Direction dir) {
                                   new_state.canonicalize(map);
                                   st_pair pair(new_state,
                                                parent_hash & 0xff);
-
-                                  auto hash = pair.hash();
-                                  outputs[hash & (shards - 1)].push_back(pair);
+                                  new_states.push_back(pair);
                                   if (new_state.win()) {
                                       win_state = pair;
                                       win = true;
@@ -346,6 +333,12 @@ int search(St start_state, const Map& map) {
                                   }
                                   return false;
                               });
+            if (new_states.size() > 100000000) {
+                MeasureTime<> timer(&dedup_sort_s);
+                total_states += new_states.size();
+                new_states_size += new_states.size();
+                pack_pairs<Packed>(&new_states, &new_keys, &new_values);
+            }
         }
     }
 
@@ -399,11 +392,10 @@ int search(St start_state, const Map& map) {
 
     printf("%ld states, %ld moves, %ld bytes\n", steps, depth,
            total_bytes);
-    printf("timing: dedup: %lfs search: %lfs print: %lfs= total: %lfs\n",
-           dedup_sort_s + dedup_merge_shards_s + dedup_merge_s,
-           search_s, print_s,
-           dedup_sort_s + dedup_merge_shards_s + dedup_merge_s +
-           search_s + print_s);
+    printf("timing: dedup: %lfs+%lfs+%lfs search: %lfs print: %lfs = total: %lfs\n",
+           dedup_flush_s, dedup_sort_s, dedup_merge_s,
+           search_s - dedup_sort_s, print_s,
+           dedup_flush_s + dedup_merge_s + search_s + print_s);
 
     return win ? depth - 1 : 0;
 }
