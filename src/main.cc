@@ -50,9 +50,9 @@ public:
 template<class K, class V,
          class Keys, class Values,
          class NewKeys, class NewValues>
-void dedup(Keys* seen_keys, Values* seen_values,
-           const NewKeys& new_keys,
-           const NewValues &new_values) {
+size_t dedup(Keys* seen_keys, Values* seen_values,
+             const NewKeys& new_keys,
+             const NewValues &new_values) {
     std::vector<bool> discard(new_keys.size());
 
     for (int run = 0; run < seen_keys->runs(); ++run) {
@@ -76,9 +76,11 @@ void dedup(Keys* seen_keys, Values* seen_values,
 
     SortedStructCompressor<sizeof(K::p_.bytes_), Keys> compress;
 
+    size_t count = 0;
     seen_values->start_run();
     for (int i = 0; i < discard.size(); ++i) {
         if (!discard[i]) {
+            ++count;
             compress.pack(new_keys[i].p_.bytes_);
             seen_values->push_back(new_values[i]);
         }
@@ -90,6 +92,8 @@ void dedup(Keys* seen_keys, Values* seen_values,
     compress.write(seen_keys);
     seen_keys->end_run();
     seen_keys->freeze();
+
+    return count;
 }
 
 template<class T>
@@ -111,7 +115,7 @@ int search(St start_state, const Map& map) {
 
     using Keys = file_backed_mmap_array<uint8_t>;
     using Values = file_backed_mmap_array<uint8_t>;
-    using NewStates = file_backed_mmap_array<Pair<Packed, uint8_t>>;
+    using NewStates = file_backed_mmap_array<st_pair>;
 
     // Just in case the starting state is invalid.
     start_state.process_gravity(map, 0);
@@ -176,8 +180,8 @@ int search(St start_state, const Map& map) {
         {
             printf(";"); fflush(stdout);
             MeasureTime<> timer(&dedup_merge_shards_s);
-            MultiMerge<Pair<Packed, uint8_t>> merge_shards(
-                [&new_keys, &new_values] (const Pair<Packed, uint8_t>& pair) {
+            MultiMerge<st_pair> merge_shards(
+                [&new_keys, &new_values] (const st_pair& pair) {
                     new_keys.push_back(pair.key_);
                     new_values.push_back(pair.value_);
                 });
@@ -196,9 +200,9 @@ int search(St start_state, const Map& map) {
         {
             printf(":"); fflush(stdout);
             MeasureTime<> timer(&dedup_merge_s);
-            dedup<Packed, uint8_t>(&seen_keys, &seen_values,
-                                   new_keys,
-                                   new_values);
+            new_unique = dedup<Packed, uint8_t>(&seen_keys, &seen_values,
+                                                new_keys,
+                                                new_values);
             seen_states_size = seen_values.size();
             state_bytes = seen_keys.size();
             new_keys.reset();
@@ -213,9 +217,6 @@ int search(St start_state, const Map& map) {
             outputs.resize(shards);
             outputs.shrink_to_fit();
         }
-
-        auto torun = seen_keys.run(seen_keys.runs() - 1);
-        new_unique = torun.second - torun.first;
 
         printf("depth: %ld unique: %ld, delta %ld (total: %ld, delta %ld), bytes: %ld\n",
                depth++,
@@ -235,6 +236,7 @@ int search(St start_state, const Map& map) {
 
         MeasureTime<> timer(&search_s);
 
+        auto torun = seen_keys.run(seen_keys.runs() - 1);
         SortedStructDecompressor<sizeof(Packed::p_.bytes_)> stream(
             seen_keys.begin() + torun.first,
             seen_keys.begin() + torun.second);

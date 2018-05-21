@@ -24,9 +24,7 @@ public:
         if (it_ == end_) {
             return false;
         }
-        memcpy(value, prev_, Length);
         unpack_internal(prev_, value);
-        memcpy(prev_, value, Length);
 
         return true;
     }
@@ -45,8 +43,9 @@ private:
         }
         for (int i = 0; i < Length; ++i) {
             if (n & (1 << i)) {
-                output[i] = *it_++ ^ prev[i];
+                prev[i] ^= *it_++;
             }
+            output[i] = prev[i];
         }
     }
 
@@ -87,10 +86,9 @@ public:
         for (int j = 0; j < Length; ++j) {
             if (n & (1 << j)) {
                 delta_transformed_.push_back(out[j]);
+                prev_[j] = value[j];
             }
         }
-
-        memcpy(prev_, value, Length);
     }
 
     void write(Output* output) {
