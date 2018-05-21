@@ -75,7 +75,7 @@ private:
         while (n) {
             uint64_t mask = n & -n;
             int bit = __builtin_ctzl(mask);
-            output[bit] ^= *it_++;
+            output[bit] = *it_++;
             n ^= mask;
         }
     }
@@ -92,12 +92,9 @@ public:
     }
 
     void pack(const uint8_t value[Length]) {
-        uint8_t out[Length];
         uint64_t n = 0;
         for (int j = 0; j < Length; ++j) {
-            uint8_t diff = prev_[j] ^ value[j];
-            out[j] = diff;
-            if (diff) {
+            if (prev_[j] != value[j]) {
                 n |= 1 << j;
             }
         }
@@ -108,7 +105,7 @@ public:
                                });
         for (int j = 0; j < Length; ++j) {
             if (n & (1 << j)) {
-                record(out[j]);
+                record(value[j]);
                 prev_[j] = value[j];
             }
         }
