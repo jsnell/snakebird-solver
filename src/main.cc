@@ -180,8 +180,8 @@ void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
     seen_keys->end_run();
 }
 
-template<class T, class Cmp>
-T* sort_dedup(T* start, T* end, Cmp cmp) {
+template<class T>
+T* sort_dedup(T* start, T* end) {
     auto copy = new T[std::distance(start, end)];
     auto copy_end = copy + std::distance(start, end);
     std::copy(start, end, copy);
@@ -258,8 +258,7 @@ int search(St start_state, const Map& map) {
 
             // Sort and dedup the shard.
             MeasureTime<> timer(&dedup_sort_s);
-            auto cmp = [](const st_pair& a, const st_pair &b) { return a < b;};
-            new_end = sort_dedup(new_states.begin(), new_states.end(), cmp);
+            new_end = sort_dedup(new_states.begin(), new_states.end());
             new_states.resize(new_end - new_states.begin());
         }
 
