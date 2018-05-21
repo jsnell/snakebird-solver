@@ -40,48 +40,4 @@ struct MeasureTime {
     typename Clock::time_point start_;
 };
 
-template<class T>
-class MultiMerge {
-public:
-    struct Source {
-        Source(T* begin, T* end) : begin(begin), end(end) {
-        }
-
-        bool operator<(const Source& other) const {
-            // Reverse comparison since pqueue defaults to having
-            // the largest element at the top.
-            return *other.begin < *begin;
-        }
-
-        const T& value() const {
-            return *begin;
-        }
-
-        T* begin;
-        T* end;
-    };
-
-    MultiMerge(std::function<void(const T&)> output) : output_(output) {
-    }
-
-    void add_input_source(T* begin, T* end) {
-        if (begin != end) {
-            state_.push(Source(begin, end));
-        }
-    }
-
-    void merge() {
-        while (!state_.empty()) {
-            auto top = state_.top();
-            output_(top.value());
-            state_.pop();
-            add_input_source(top.begin + 1, top.end);
-        }
-    }
-
-private:
-    std::priority_queue<Source> state_;
-    std::function<void(const T&)> output_;
-};
-
 #endif
