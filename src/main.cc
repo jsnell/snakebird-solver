@@ -98,6 +98,59 @@ private:
     const uint8_t* end_;
 };
 
+template<int Length, class Output>
+class SortedStructCompressor {
+public:
+    SortedStructCompressor() {
+    }
+
+    void pack(const uint8_t value[Length]) {
+        uint8_t out[Length];
+        uint64_t n = 0;
+        for (int j = 0; j < Length; ++j) {
+            uint8_t diff = prev_[j] ^ value[j];
+            out[j] = diff;
+            if (diff) {
+                n |= 1 << j;
+            }
+        }
+
+        for (int i = 0; i < Length; i += 8) {
+            delta_transformed_.push_back(n >> i);
+        }
+        for (int j = 0; j < Length; ++j) {
+            if (n & (1 << j)) {
+                delta_transformed_.push_back(out[j]);
+            }
+        }
+
+        memcpy(prev_, value, Length);
+    }
+
+    void write(Output* output) {
+        snappy::ByteArraySource source((char*) &delta_transformed_[0],
+                                       delta_transformed_.size());
+        struct SnappySink : snappy::Sink {
+            SnappySink(Output* out) : out(out) {
+            };
+
+            virtual void Append(const char* bytes, size_t n) override {
+                for (int i = 0; i < n; ++i) {
+                    out->push_back(bytes[i]);
+                }
+            }
+
+            Output* out;
+        };
+        SnappySink sink(output);
+        snappy::Compress(&source, &sink);
+    }
+
+private:
+    uint8_t prev_[Length] = { 0 };
+    std::vector<uint8_t> delta_transformed_;
+};
+
 template<class K, class V,
          class Keys, class Values, class Todo, class NewStates>
 void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
@@ -123,60 +176,21 @@ void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
         }
     }
 
-    seen_values->start_run();
-    K prev;
+    SortedStructCompressor<sizeof(K::p_.bytes_), Keys> compress;
 
-    std::vector<uint8_t> delta_compressed;
+    seen_values->start_run();
     for (int i = 0; i < discard.size(); ++i) {
         if (!discard[i]) {
-            const auto& key = new_states[i].key_;
-            K out;
-            uint64_t n = 0;
-            const int kBytes = sizeof(key.p_.bytes_);
-            for (int j = 0; j < kBytes; ++j) {
-                uint8_t diff = prev.p_.bytes_[j] ^ key.p_.bytes_[j];
-                out.p_.bytes_[j] = diff;
-                if (diff) {
-                    n |= 1 << j;
-                }
-            }
-
-            for (int i = 0; i < kBytes; i += 8) {
-                delta_compressed.push_back(n >> i);
-            }
-            for (int j = 0; j < kBytes; ++j) {
-                if (n & (1 << j)) {
-                    delta_compressed.push_back(out.p_.bytes_[j]);
-                }
-            }
-
-            prev = key;
-
+            compress.pack(new_states[i].key_.p_.bytes_);
             seen_values->push_back(new_states[i].value_);
             todo->push_back(new_states[i].key_);
         }
     }
     seen_values->end_run();
 
-    snappy::ByteArraySource source((char*) &delta_compressed[0],
-                                   delta_compressed.size());
-    struct SnappySink : snappy::Sink {
-        SnappySink(Keys* out) : out(out) {
-        };
-
-        virtual void Append(const char* bytes, size_t n) override {
-            for (int i = 0; i < n; ++i) {
-                out->push_back(bytes[i]);
-            }
-        }
-
-        Keys* out;
-    };
-    SnappySink sink(seen_keys);
-
     seen_keys->thaw();
     seen_keys->start_run();
-    Compress(&source, &sink);
+    compress.write(seen_keys);
     seen_keys->end_run();
 }
 
