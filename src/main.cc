@@ -81,7 +81,7 @@ size_t dedup(Keys* seen_keys, Values* seen_values,
         int i_ = 0;
         K value_;
         bool empty_ = false;
-        SortedStructDecompressor<sizeof(K::p_.bytes_)> stream_;
+        ByteArrayDeltaDecompressor<sizeof(K::p_.bytes_)> stream_;
     };
 
     struct Cmp {
@@ -167,7 +167,7 @@ size_t dedup(Keys* seen_keys, Values* seen_values,
         ;
     }
 
-    SortedStructCompressor<sizeof(K::p_.bytes_),
+    ByteArrayDeltaCompressor<sizeof(K::p_.bytes_),
                            false,
                            Keys> compress { seen_keys };
 
@@ -200,7 +200,7 @@ void pack_pairs(Pairs* new_states, Keys* new_keys, Values* new_values) {
 
     new_keys->start_run();
     new_values->start_run();
-    SortedStructCompressor<sizeof(Key::p_.bytes_),
+    ByteArrayDeltaCompressor<sizeof(Key::p_.bytes_),
                            false,
                            Keys> compress { new_keys };
     for (const auto& pair : *new_states) {
@@ -302,7 +302,7 @@ int search(St start_state, const Map& map) {
         MeasureTime<> timer(&search_s);
 
         auto torun = seen_keys.run(seen_keys.runs() - 1);
-        SortedStructDecompressor<sizeof(Packed::p_.bytes_)> stream(
+        ByteArrayDeltaDecompressor<sizeof(Packed::p_.bytes_)> stream(
             seen_keys.begin() + torun.first,
             seen_keys.begin() + torun.second);
 
@@ -358,7 +358,7 @@ int search(St start_state, const Map& map) {
 
         for (int i = depth - 1; i > 0; --i) {
             auto runinfo = seen_keys.run(i - 1);
-            SortedStructDecompressor<sizeof(Packed::p_.bytes_)> stream(
+            ByteArrayDeltaDecompressor<sizeof(Packed::p_.bytes_)> stream(
                 seen_keys.begin() + runinfo.first,
                 seen_keys.begin() + runinfo.second);
             printf("Move %d\n", i);

@@ -46,9 +46,9 @@ public:
 };
 
 template<int Length, bool Compress=false>
-class SortedStructDecompressor {
+class ByteArrayDeltaDecompressor {
 public:
-    SortedStructDecompressor(const uint8_t* begin, const uint8_t* end) {
+    ByteArrayDeltaDecompressor(const uint8_t* begin, const uint8_t* end) {
         if (Compress) {
             snappy::Uncompress((char*) begin, std::distance(begin, end),
                                &uncompressed_);
@@ -86,9 +86,9 @@ private:
 };
 
 template<int Length, bool Compress, class Output>
-class SortedStructCompressor {
+class ByteArrayDeltaCompressor {
 public:
-    SortedStructCompressor(Output* output) : output_(output) {
+    ByteArrayDeltaCompressor(Output* output) : output_(output) {
     }
 
     void pack(const uint8_t value[Length]) {
