@@ -48,14 +48,13 @@ public:
 };
 
 template<class K, class V,
-         class Keys, class Values, class Todo,
+         class Keys, class Values,
          class NewKeys, class NewValues>
-void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
+void dedup(Keys* seen_keys, Values* seen_values,
            const NewKeys& new_keys,
            const NewValues &new_values) {
     std::vector<bool> discard(new_keys.size());
 
-    seen_keys->freeze();
     for (int run = 0; run < seen_keys->runs(); ++run) {
         auto runinfo = seen_keys->run(run);
         SortedStructDecompressor<sizeof(K::p_.bytes_)> stream(
@@ -82,7 +81,6 @@ void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
         if (!discard[i]) {
             compress.pack(new_keys[i].p_.bytes_);
             seen_values->push_back(new_values[i]);
-            todo->push_back(new_keys[i]);
         }
     }
     seen_values->end_run();
@@ -91,6 +89,7 @@ void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
     seen_keys->start_run();
     compress.write(seen_keys);
     seen_keys->end_run();
+    seen_keys->freeze();
 }
 
 template<class T>
@@ -122,7 +121,6 @@ int search(St start_state, const Map& map) {
     // BFS state
     Keys seen_keys;
     Values seen_values;
-    std::vector<Packed> todo;
     size_t steps = 0;
     st_pair win_state = st_pair(null_state, 0);
     bool win = false;
@@ -140,15 +138,13 @@ int search(St start_state, const Map& map) {
         outputs[0].push_back(st_pair(start_state, 0));
         St(pair.key_).print(map);
     }
+    seen_keys.freeze();
 
     size_t total_states = 0;
     size_t depth = 0;
     double dedup_flush_s = 0, dedup_sort_s = 0, dedup_merge_shards_s = 0,
         dedup_merge_s = 0, search_s = 0, print_s = 0;
     while (1) {
-        // Empty the todo list
-        todo.clear();
-
         size_t seen_states_size = 0;
         size_t new_states_size = 0;
         for (auto& output : outputs) {
@@ -196,16 +192,15 @@ int search(St start_state, const Map& map) {
             new_values.freeze();
         }
 
+        size_t new_unique = 0;
         {
             printf(":"); fflush(stdout);
-            // Build a new todo list from the entries in new_states not
-            // contained in seen_states.
             MeasureTime<> timer(&dedup_merge_s);
-            dedup<Packed, uint8_t>(&seen_keys, &seen_values, &todo,
+            dedup<Packed, uint8_t>(&seen_keys, &seen_values,
                                    new_keys,
                                    new_values);
-            seen_states_size += seen_values.size();
-            state_bytes += seen_keys.size();
+            seen_states_size = seen_values.size();
+            state_bytes = seen_keys.size();
             new_keys.reset();
             new_values.reset();
         }
@@ -219,9 +214,12 @@ int search(St start_state, const Map& map) {
             outputs.shrink_to_fit();
         }
 
+        auto torun = seen_keys.run(seen_keys.runs() - 1);
+        new_unique = torun.second - torun.first;
+
         printf("depth: %ld unique: %ld, delta %ld (total: %ld, delta %ld), bytes: %ld\n",
                depth++,
-               seen_states_size, todo.size(),
+               seen_states_size, new_unique,
                total_states, new_states_size,
                state_bytes);
         printf("timing: dedup: %lfs+%lfs+%lfs+%lfs search: %lfs = total: %lfs\n",
@@ -231,12 +229,18 @@ int search(St start_state, const Map& map) {
                dedup_flush_s + dedup_sort_s + dedup_merge_shards_s +
                dedup_merge_s + search_s);
 
-        if (win || todo.empty()) {
+        if (win || !new_unique) {
             break;
         }
 
         MeasureTime<> timer(&search_s);
-        for (auto packed : todo) {
+
+        SortedStructDecompressor<sizeof(Packed::p_.bytes_)> stream(
+            seen_keys.begin() + torun.first,
+            seen_keys.begin() + torun.second);
+
+        Packed packed;
+        while (stream.unpack(packed.p_.bytes_)) {
             St st(packed);
 
             if (!(++steps & 0x7ffff)) {
