@@ -3,7 +3,18 @@
 #ifndef FILE_BACKED_ARRAY_H
 #define FILE_BACKED_ARRAY_H
 
+#include <algorithm>
+#include <cassert>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <vector>
+
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 template<class T,
          // 100M

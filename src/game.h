@@ -3,8 +3,13 @@
 #ifndef GAME_H
 #define GAME_H
 
+#include <algorithm>
+#include <cassert>
+#include <cstring>
+#include <functional>
 #include <unordered_map>
 
+#include "bit-packer.h"
 #include "util.h"
 
 enum Direction {

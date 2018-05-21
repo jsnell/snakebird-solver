@@ -3,7 +3,9 @@
 #ifndef UTIL_H
 #define UTIL_H
 
+#include <cassert>
 #include <chrono>
+#include <queue>
 
 template<uint64_t I>
 struct integer_length {
