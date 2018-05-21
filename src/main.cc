@@ -245,6 +245,7 @@ int search(St start_state, const Map& map) {
         size_t state_bytes = 0;
 
         for (auto& new_states : outputs) {
+            printf(",");
             {
                 MeasureTime<> timer(&dedup_flush_s);
                 new_states.snapshot();
@@ -266,6 +267,7 @@ int search(St start_state, const Map& map) {
         if (shards == 1) {
             std::swap(outputs[0], all_new_states);
         } else {
+            printf(";");
             MeasureTime<> timer(&dedup_merge_shards_s);
             MultiMerge<Pair<Packed, uint8_t>,
                        file_backed_mmap_array<Pair<Packed, uint8_t>>> merge_shards(&all_new_states);
@@ -280,6 +282,7 @@ int search(St start_state, const Map& map) {
         }
 
         {
+            printf(":");
             // Build a new todo list from the entries in new_states not
             // contained in seen_states.
             MeasureTime<> timer(&dedup_merge_s);
