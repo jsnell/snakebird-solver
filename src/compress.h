@@ -45,7 +45,7 @@ public:
     }
 };
 
-template<int Length, bool Compress=true>
+template<int Length, bool Compress=false>
 class SortedStructDecompressor {
 public:
     SortedStructDecompressor(const uint8_t* begin, const uint8_t* end) {

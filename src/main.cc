@@ -53,27 +53,85 @@ size_t dedup(Keys* seen_keys, Values* seen_values,
              const Keys& new_keys,
              const Values &new_values) {
     std::vector<bool> discard(new_values.size());
+    struct StreamReader {
+        StreamReader(int i, uint8_t* begin, uint8_t* end)
+            : i_(i), stream_(begin, end) {
+            next();
+        }
 
+        const K& value() const {
+            return value_;
+        }
+
+        bool empty() {
+            return empty_;
+        }
+
+        bool next() {
+            if (!stream_.unpack(value_.p_.bytes_)) {
+                empty_ = true;
+            }
+            return !empty_;
+        }
+
+        bool operator<(const StreamReader& other) const {
+            return value_ < other.value_;
+        }
+
+        int i_ = 0;
+        K value_;
+        bool empty_ = false;
+        SortedStructDecompressor<sizeof(K::p_.bytes_)> stream_;
+    };
+
+    struct Cmp {
+        bool operator()(const StreamReader* a,
+                        const StreamReader* b) {
+            return *b < *a;
+        }
+    };
+
+    std::priority_queue<StreamReader*,
+                        std::vector<StreamReader*>,
+                        Cmp> seen_keys_streams;
     for (int run = 0; run < seen_keys->runs(); ++run) {
         auto runinfo = seen_keys->run(run);
-        SortedStructDecompressor<sizeof(K::p_.bytes_)> stream(
-            seen_keys->begin() + runinfo.first,
-            seen_keys->begin() + runinfo.second);
+        if (runinfo.first != runinfo.second) {
+            seen_keys_streams.push(new StreamReader(
+                                       run,
+                                       seen_keys->begin() + runinfo.first,
+                                       seen_keys->begin() + runinfo.second));
+        }
+    }
+
+    {
         SortedStructDecompressor<sizeof(K::p_.bytes_), false> new_stream(
             new_keys.begin(), new_keys.end());
 
         K nkey;
         if (new_stream.unpack(nkey.p_.bytes_)) {
-            K key;
-            for (size_t i = 0; stream.unpack(key.p_.bytes_); ) {
+            size_t i = 0;
+            while (!seen_keys_streams.empty()) {
+                auto top = seen_keys_streams.top();
+                seen_keys_streams.pop();
+                const K& key = top->value();
                 while (nkey < key) {
                     if (!new_stream.unpack(nkey.p_.bytes_)) {
+                        while (!seen_keys_streams.empty()) {
+                            delete seen_keys_streams.top();
+                            seen_keys_streams.pop();
+                        }
                         goto done;
                     }
                     ++i;
                 }
                 if (key == nkey) {
                     discard[i] = true;
+                }
+                if (top->next()) {
+                    seen_keys_streams.push(top);
+                } else {
+                    delete top;
                 }
             }
         done:
@@ -82,10 +140,12 @@ size_t dedup(Keys* seen_keys, Values* seen_values,
     }
 
     SortedStructCompressor<sizeof(K::p_.bytes_),
-                           true,
+                           false,
                            Keys> compress { seen_keys };
 
     size_t count = 0;
+    seen_keys->thaw();
+    seen_keys->start_run();
     seen_values->start_run();
 
     SortedStructDecompressor<sizeof(K::p_.bytes_), false> new_stream(
@@ -99,13 +159,11 @@ size_t dedup(Keys* seen_keys, Values* seen_values,
             seen_values->push_back(new_values[i]);
         }
     }
-    seen_values->end_run();
 
-    seen_keys->thaw();
-    seen_keys->start_run();
     compress.write();
-    seen_keys->end_run();
     seen_keys->freeze();
+    seen_keys->end_run();
+    seen_values->end_run();
 
     return count;
 }
