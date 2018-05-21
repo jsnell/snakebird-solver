@@ -35,9 +35,13 @@ private:
     void unpack_internal(uint8_t prev[Length],
                          uint8_t output[Length]) {
         uint64_t n = 0;
-        for (int i = 0; i < Length; i += 8) {
+        for (int i = 0; i < Length; i += 7) {
             uint64_t byte = *it_++;
-            n |= byte << i;
+            uint64_t hibit = byte & (1 << 7);
+            n |= (byte & mask_n_bits(7)) << i;
+            if (!hibit) {
+                break;
+            }
         }
         for (int i = 0; i < Length; ++i) {
             if (n & (1 << i)) {
@@ -69,8 +73,16 @@ public:
             }
         }
 
-        for (int i = 0; i < Length; i += 8) {
-            delta_transformed_.push_back(n >> i);
+        for (int i = 0; i < Length; i += 7) {
+            uint64_t hibit = 0;
+            if (n >> (i + 7)) {
+                hibit = 1 << 7;
+            }
+            delta_transformed_.push_back(((n >> i) & mask_n_bits(7)) |
+                                         hibit);
+            if (!hibit) {
+                break;
+            }
         }
         for (int j = 0; j < Length; ++j) {
             if (n & (1 << j)) {
