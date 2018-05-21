@@ -48,10 +48,12 @@ public:
 };
 
 template<class K, class V,
-         class Keys, class Values, class Todo, class NewStates>
+         class Keys, class Values, class Todo,
+         class NewKeys, class NewValues>
 void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
-           const NewStates& new_states) {
-    std::vector<bool> discard(new_states.size());
+           const NewKeys& new_keys,
+           const NewValues &new_values) {
+    std::vector<bool> discard(new_keys.size());
 
     seen_keys->freeze();
     for (int run = 0; run < seen_keys->runs(); ++run) {
@@ -59,15 +61,16 @@ void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
         SortedStructDecompressor<sizeof(K::p_.bytes_)> stream(
             seen_keys->begin() + runinfo.first,
             seen_keys->begin() + runinfo.second);
-        auto it = new_states.begin();
+        auto it = new_keys.begin();
 
         K key;
-        while (stream.unpack(key.p_.bytes_)) {
-            while (it != new_states.end() && it->key_ < key) {
+        for (size_t i = 0; stream.unpack(key.p_.bytes_); ) {
+            while (it != new_keys.end() && *it < key) {
                 ++it;
+                ++i;
             }
-            if (key == it->key_) {
-                discard[it - new_states.begin()] = true;
+            if (key == *it) {
+                discard[i] = true;
             }
         }
     }
@@ -77,9 +80,9 @@ void dedup(Keys* seen_keys, Values* seen_values, Todo* todo,
     seen_values->start_run();
     for (int i = 0; i < discard.size(); ++i) {
         if (!discard[i]) {
-            compress.pack(new_states[i].key_.p_.bytes_);
-            seen_values->push_back(new_states[i].value_);
-            todo->push_back(new_states[i].key_);
+            compress.pack(new_keys[i].p_.bytes_);
+            seen_values->push_back(new_values[i]);
+            todo->push_back(new_keys[i]);
         }
     }
     seen_values->end_run();
@@ -155,7 +158,7 @@ int search(St start_state, const Map& map) {
         size_t state_bytes = 0;
 
         for (auto& new_states : outputs) {
-            printf(",");
+            printf(","); fflush(stdout);
             {
                 MeasureTime<> timer(&dedup_flush_s);
                 new_states.snapshot();
@@ -172,14 +175,16 @@ int search(St start_state, const Map& map) {
             new_states.resize(new_end - new_states.begin());
         }
 
-        file_backed_mmap_array<Pair<Packed, uint8_t>> all_new_states;
-        if (shards == 1) {
-            std::swap(outputs[0], all_new_states);
-        } else {
-            printf(";");
+        file_backed_mmap_array<Packed> new_keys;
+        file_backed_mmap_array<uint8_t> new_values;
+        {
+            printf(";"); fflush(stdout);
             MeasureTime<> timer(&dedup_merge_shards_s);
-            MultiMerge<Pair<Packed, uint8_t>,
-                       file_backed_mmap_array<Pair<Packed, uint8_t>>> merge_shards(&all_new_states);
+            MultiMerge<Pair<Packed, uint8_t>> merge_shards(
+                [&new_keys, &new_values] (const Pair<Packed, uint8_t>& pair) {
+                    new_keys.push_back(pair.key_);
+                    new_values.push_back(pair.value_);
+                });
             for (auto& o : outputs) {
                 merge_shards.add_input_source(o.begin(), o.end());
             }
@@ -187,19 +192,22 @@ int search(St start_state, const Map& map) {
             for (auto& o : outputs) {
                 o.reset();
             }
-            all_new_states.freeze();
+            new_keys.freeze();
+            new_values.freeze();
         }
 
         {
-            printf(":");
+            printf(":"); fflush(stdout);
             // Build a new todo list from the entries in new_states not
             // contained in seen_states.
             MeasureTime<> timer(&dedup_merge_s);
             dedup<Packed, uint8_t>(&seen_keys, &seen_values, &todo,
-                                   all_new_states);
+                                   new_keys,
+                                   new_values);
             seen_states_size += seen_values.size();
             state_bytes += seen_keys.size();
-            all_new_states.reset();
+            new_keys.reset();
+            new_values.reset();
         }
 
         if (new_states_size / shards > 100000000) {

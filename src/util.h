@@ -40,7 +40,7 @@ struct MeasureTime {
     typename Clock::time_point start_;
 };
 
-template<class T, class Output>
+template<class T>
 class MultiMerge {
 public:
     struct Source {
@@ -61,7 +61,7 @@ public:
         T* end;
     };
 
-    MultiMerge(Output* output) : output_(output) {
+    MultiMerge(std::function<void(const T&)> output) : output_(output) {
     }
 
     void add_input_source(T* begin, T* end) {
@@ -73,7 +73,7 @@ public:
     void merge() {
         while (!state_.empty()) {
             auto top = state_.top();
-            output_->push_back(top.value());
+            output_(top.value());
             state_.pop();
             add_input_source(top.begin + 1, top.end);
         }
@@ -81,7 +81,7 @@ public:
 
 private:
     std::priority_queue<Source> state_;
-    Output* output_;
+    std::function<void(const T&)> output_;
 };
 
 #endif
