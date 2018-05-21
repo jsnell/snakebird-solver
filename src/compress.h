@@ -10,6 +10,41 @@
 #include <third-party/snappy/snappy.h>
 #include <third-party/snappy/snappy-sinksource.h>
 
+template<int Width>
+class VarInt {
+public:
+    static uint64_t decode(const uint8_t*& it) {
+        uint8_t byte = *it++;
+        if (Width <= 8) {
+            return byte;
+        }
+        if (Width <= 15) {
+            if (!(byte & (1 << 7))) {
+                return byte;
+            }
+            return byte | (*it++ << 7);
+        }
+        assert(false);
+    }
+
+    static void encode(uint64_t value, std::function<void(uint8_t)> emit) {
+        if (Width <= 8) {
+            emit(value);
+            return;
+        }
+        if (Width <= 15) {
+            if (value <= mask_n_bits(7)) {
+                emit(value);
+                return;
+            }
+            emit((value & mask_n_bits(7)) | (1 << 7));
+            emit(value >> 7);
+            return;
+        }
+        assert(false);
+    }
+};
+
 template<int Length, bool Compress=true>
 class SortedStructDecompressor {
 public:
@@ -36,19 +71,12 @@ public:
 
 private:
     void unpack_internal(uint8_t output[Length]) {
-        uint64_t n = 0;
-        for (int i = 0; i < Length; i += 7) {
-            uint64_t byte = *it_++;
-            uint64_t hibit = byte & (1 << 7);
-            n |= (byte & mask_n_bits(7)) << i;
-            if (!hibit) {
-                break;
-            }
-        }
-        for (int i = 0; i < Length; ++i) {
-            if (n & (1 << i)) {
-                output[i] ^= *it_++;
-            }
+        uint64_t n = VarInt<Length>::decode(it_);
+        while (n) {
+            uint64_t mask = n & -n;
+            int bit = __builtin_ctzl(mask);
+            output[bit] ^= *it_++;
+            n ^= mask;
         }
     }
 
@@ -74,16 +102,10 @@ public:
             }
         }
 
-        for (int i = 0; i < Length; i += 7) {
-            uint64_t hibit = 0;
-            if (n >> (i + 7)) {
-                hibit = 1 << 7;
-            }
-            record(((n >> i) & mask_n_bits(7)) | hibit);
-            if (!hibit) {
-                break;
-            }
-        }
+        VarInt<Length>::encode(n,
+                               [this] (uint8_t value) {
+                                   record(value);
+                               });
         for (int j = 0; j < Length; ++j) {
             if (n & (1 << j)) {
                 record(out[j]);
