@@ -10,14 +10,19 @@
 #include <third-party/snappy/snappy.h>
 #include <third-party/snappy/snappy-sinksource.h>
 
-template<int Length>
+template<int Length, bool Compress=true>
 class SortedStructDecompressor {
 public:
-    SortedStructDecompressor(uint8_t* begin, uint8_t* end) {
-        snappy::Uncompress((char*) begin, std::distance(begin, end),
-                           &uncompressed_);
-        it_ = (const uint8_t*) uncompressed_.data();
-        end_ = it_ + uncompressed_.size();
+    SortedStructDecompressor(const uint8_t* begin, const uint8_t* end) {
+        if (Compress) {
+            snappy::Uncompress((char*) begin, std::distance(begin, end),
+                               &uncompressed_);
+            it_ = (const uint8_t*) uncompressed_.data();
+            end_ = it_ + uncompressed_.size();
+        } else {
+            it_ = begin;
+            end_ = end;
+        }
     }
 
     bool unpack(uint8_t value[Length]) {
@@ -55,10 +60,10 @@ private:
     const uint8_t* end_;
 };
 
-template<int Length, class Output>
+template<int Length, bool Compress, class Output>
 class SortedStructCompressor {
 public:
-    SortedStructCompressor() {
+    SortedStructCompressor(Output* output) : output_(output) {
     }
 
     void pack(const uint8_t value[Length]) {
@@ -77,21 +82,35 @@ public:
             if (n >> (i + 7)) {
                 hibit = 1 << 7;
             }
-            delta_transformed_.push_back(((n >> i) & mask_n_bits(7)) |
-                                         hibit);
+            record(((n >> i) & mask_n_bits(7)) | hibit);
             if (!hibit) {
                 break;
             }
         }
         for (int j = 0; j < Length; ++j) {
             if (n & (1 << j)) {
-                delta_transformed_.push_back(out[j]);
+                record(out[j]);
                 prev_[j] = value[j];
             }
         }
     }
 
-    void write(Output* output) {
+    void write() {
+        if (Compress) {
+            write_compressed();
+        }
+    }
+
+private:
+    void record(uint8_t byte) {
+        if (Compress) {
+            delta_transformed_.push_back(byte);
+        } else {
+            output_->push_back(byte);
+        }
+    }
+
+    void write_compressed() {
         snappy::ByteArraySource source((char*) &delta_transformed_[0],
                                        delta_transformed_.size());
         struct SnappySink : snappy::Sink {
@@ -106,13 +125,13 @@ public:
 
             Output* out;
         };
-        SnappySink sink(output);
+        SnappySink sink(output_);
         snappy::Compress(&source, &sink);
     }
 
-private:
     uint8_t prev_[Length] = { 0 };
     std::vector<uint8_t> delta_transformed_;
+    Output* output_;
 };
 
 #endif // COMPRESS_H

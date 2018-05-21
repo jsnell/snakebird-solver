@@ -48,40 +48,54 @@ public:
 };
 
 template<class K, class V,
-         class Keys, class Values,
-         class NewKeys, class NewValues>
+         class Keys, class Values>
 size_t dedup(Keys* seen_keys, Values* seen_values,
-             const NewKeys& new_keys,
-             const NewValues &new_values) {
-    std::vector<bool> discard(new_keys.size());
+             const Keys& new_keys,
+             const Values &new_values) {
+    std::vector<bool> discard(new_values.size());
 
     for (int run = 0; run < seen_keys->runs(); ++run) {
         auto runinfo = seen_keys->run(run);
         SortedStructDecompressor<sizeof(K::p_.bytes_)> stream(
             seen_keys->begin() + runinfo.first,
             seen_keys->begin() + runinfo.second);
-        auto it = new_keys.begin();
+        SortedStructDecompressor<sizeof(K::p_.bytes_), false> new_stream(
+            new_keys.begin(), new_keys.end());
 
-        K key;
-        for (size_t i = 0; stream.unpack(key.p_.bytes_); ) {
-            while (it != new_keys.end() && *it < key) {
-                ++it;
-                ++i;
+        K nkey;
+        if (new_stream.unpack(nkey.p_.bytes_)) {
+            K key;
+            for (size_t i = 0; stream.unpack(key.p_.bytes_); ) {
+                while (nkey < key) {
+                    if (!new_stream.unpack(nkey.p_.bytes_)) {
+                        goto done;
+                    }
+                    ++i;
+                }
+                if (key == nkey) {
+                    discard[i] = true;
+                }
             }
-            if (key == *it) {
-                discard[i] = true;
-            }
+        done:
+            ;
         }
     }
 
-    SortedStructCompressor<sizeof(K::p_.bytes_), Keys> compress;
+    SortedStructCompressor<sizeof(K::p_.bytes_),
+                           true,
+                           Keys> compress { seen_keys };
 
     size_t count = 0;
     seen_values->start_run();
+
+    SortedStructDecompressor<sizeof(K::p_.bytes_), false> new_stream(
+        new_keys.begin(), new_keys.end());
+    K nkey;
     for (int i = 0; i < discard.size(); ++i) {
+        new_stream.unpack(nkey.p_.bytes_);
         if (!discard[i]) {
             ++count;
-            compress.pack(new_keys[i].p_.bytes_);
+            compress.pack(nkey.p_.bytes_);
             seen_values->push_back(new_values[i]);
         }
     }
@@ -89,7 +103,7 @@ size_t dedup(Keys* seen_keys, Values* seen_values,
 
     seen_keys->thaw();
     seen_keys->start_run();
-    compress.write(seen_keys);
+    compress.write();
     seen_keys->end_run();
     seen_keys->freeze();
 
@@ -175,14 +189,17 @@ int search(St start_state, const Map& map) {
             new_states.resize(new_end - new_states.begin());
         }
 
-        file_backed_mmap_array<Packed> new_keys;
-        file_backed_mmap_array<uint8_t> new_values;
+        Keys new_keys;
+        Values new_values;
         {
             printf(";"); fflush(stdout);
             MeasureTime<> timer(&dedup_merge_shards_s);
+            SortedStructCompressor<sizeof(Packed::p_.bytes_),
+                                   false,
+                                   Keys> compress { &new_keys };
             MultiMerge<st_pair> merge_shards(
-                [&new_keys, &new_values] (const st_pair& pair) {
-                    new_keys.push_back(pair.key_);
+                [&compress, &new_values] (const st_pair& pair) {
+                    compress.pack(pair.key_.p_.bytes_);
                     new_values.push_back(pair.value_);
                 });
             for (auto& o : outputs) {
@@ -192,6 +209,7 @@ int search(St start_state, const Map& map) {
             for (auto& o : outputs) {
                 o.reset();
             }
+            compress.write();
             new_keys.freeze();
             new_values.freeze();
         }
@@ -283,7 +301,6 @@ int search(St start_state, const Map& map) {
 
         st_pair target = win_state;
 
-        seen_keys.freeze();
         seen_values.freeze();
         total_bytes += seen_keys.size();
         total_bytes += seen_values.size();
