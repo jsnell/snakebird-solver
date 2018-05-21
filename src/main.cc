@@ -53,53 +53,17 @@ size_t dedup(Keys* seen_keys, Values* seen_values,
              const Keys& new_keys,
              const Values &new_values) {
     std::vector<bool> discard(new_values.size());
-    struct StreamReader {
-        StreamReader(int i, const uint8_t* begin, const uint8_t* end)
-            : i_(i), stream_(begin, end) {
-            next();
-        }
 
-        const K& value() const {
-            return value_;
-        }
-
-        bool empty() {
-            return empty_;
-        }
-
-        bool next() {
-            if (!stream_.unpack(value_.p_.bytes_)) {
-                empty_ = true;
-            }
-            return !empty_;
-        }
-
-        bool operator<(const StreamReader& other) const {
-            return value_ < other.value_;
-        }
-
-        int i_ = 0;
-        K value_;
-        bool empty_ = false;
-        ByteArrayDeltaDecompressor<sizeof(K::p_.bytes_)> stream_;
-    };
-
-    struct Cmp {
-        bool operator()(const StreamReader* a,
-                        const StreamReader* b) {
-            return *b < *a;
-        }
-    };
+    using Stream = StructureDeltaDecompressorStream<K>;
 
     struct StreamMultiplexer {
         StreamMultiplexer(const Keys& keys) {
             for (int run = 0; run < keys.runs(); ++run) {
                 auto runinfo = keys.run(run);
                 if (runinfo.first != runinfo.second) {
-                    streams_.push(new StreamReader(
-                                      run,
-                                      keys.begin() + runinfo.first,
-                                      keys.begin() + runinfo.second));
+                    streams_.push(new Stream(run,
+                                             keys.begin() + runinfo.first,
+                                             keys.begin() + runinfo.second));
                 }
             }
         }
@@ -141,9 +105,13 @@ size_t dedup(Keys* seen_keys, Values* seen_values,
         K top_;
         bool empty_ = false;
 
-        std::priority_queue<StreamReader*,
-                            std::vector<StreamReader*>,
-                            Cmp> streams_;
+        struct Cmp {
+            bool operator()(const Stream* a, const Stream* b) {
+                return *b < *a;
+            }
+        };
+
+        std::priority_queue<Stream*, std::vector<Stream*>, Cmp> streams_;
     };
 
     if (new_keys.size()) {

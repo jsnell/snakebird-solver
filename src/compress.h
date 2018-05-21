@@ -150,4 +150,41 @@ private:
     Output* output_;
 };
 
+template<class T>
+class StructureDeltaDecompressorStream {
+public:
+    StructureDeltaDecompressorStream(int id,
+                                     const uint8_t* begin,
+                                     const uint8_t* end)
+        : id_(id), stream_(begin, end) {
+        next();
+    }
+
+    const T& value() const {
+        return value_;
+    }
+
+    bool empty() {
+        return empty_;
+    }
+
+    bool next() {
+        if (!stream_.unpack(value_.p_.bytes_)) {
+            empty_ = true;
+        }
+        return !empty_;
+    }
+
+    bool operator<(const StructureDeltaDecompressorStream& other) const {
+        return value_ < other.value_;
+    }
+
+private:
+    int id_ = 0;
+    T value_;
+    bool empty_ = false;
+    ByteArrayDeltaDecompressor<sizeof(T::p_.bytes_)> stream_;
+};
+
+
 #endif // COMPRESS_H
