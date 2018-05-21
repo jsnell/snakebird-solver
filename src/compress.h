@@ -29,14 +29,13 @@ public:
         if (it_ == end_) {
             return false;
         }
-        unpack_internal(prev_, value);
+        unpack_internal(value);
 
         return true;
     }
 
 private:
-    void unpack_internal(uint8_t prev[Length],
-                         uint8_t output[Length]) {
+    void unpack_internal(uint8_t output[Length]) {
         uint64_t n = 0;
         for (int i = 0; i < Length; i += 7) {
             uint64_t byte = *it_++;
@@ -48,14 +47,12 @@ private:
         }
         for (int i = 0; i < Length; ++i) {
             if (n & (1 << i)) {
-                prev[i] ^= *it_++;
+                output[i] ^= *it_++;
             }
-            output[i] = prev[i];
         }
     }
 
     std::string uncompressed_;
-    uint8_t prev_[Length] = { 0 };
     const uint8_t* it_;
     const uint8_t* end_;
 };
