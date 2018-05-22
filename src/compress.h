@@ -162,11 +162,10 @@ private:
 template<class T>
 class StructureDeltaDecompressorStream {
 public:
-    StructureDeltaDecompressorStream(int id,
-                                     const uint8_t* begin,
-                                     const uint8_t* end)
+    StructureDeltaDecompressorStream(const uint8_t* begin,
+                                     const uint8_t* end,
+                                     int id = 0)
         : id_(id), stream_(begin, end) {
-        next();
     }
 
     const T& value() const {

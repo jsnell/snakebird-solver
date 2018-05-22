@@ -7,6 +7,7 @@
 #include <cassert>
 #include <cstring>
 #include <functional>
+#include <third-party/cityhash/city.h>
 #include <unordered_map>
 
 #include "bit-packer.h"
@@ -444,9 +445,7 @@ public:
     }
 
     bool do_valid_moves(const Map& map,
-                        std::function<bool(State,
-                                           int si,
-                                           Direction)> fun) const {
+                        std::function<bool(State)> fun) const {
         static Direction dirs[] = {
             UP, RIGHT, DOWN, LEFT,
         };
@@ -470,7 +469,7 @@ public:
                     new_state.snakes_[si].grow(dir);
                     new_state.delete_fruit(fruit_index);
                     if (new_state.process_gravity(map, tele_mask)) {
-                        if (fun(new_state, si, dir)) {
+                        if (fun(new_state)) {
                             return true;
                         }
                     }
@@ -478,7 +477,7 @@ public:
                     State new_state(*this);
                     new_state.snakes_[si].move(dir);
                     if (new_state.process_gravity(map, tele_mask)) {
-                        if (fun(new_state, si, dir)) {
+                        if (fun(new_state)) {
                             return true;
                         }
                     }
@@ -491,11 +490,8 @@ public:
                     State new_state(*this);
                     new_state.snakes_[si].move(dir);
                     new_state.do_pushes(obj_map, pushed_ids, delta);
-                    // printf("++\n");
-                    // print(map);
-                    // new_state.print(map);
                     if (new_state.process_gravity(map, tele_mask)) {
-                        if (fun(new_state, si, dir)) {
+                        if (fun(new_state)) {
                             return true;
                         }
                     }
@@ -996,6 +992,10 @@ public:
             typename P::Context pc;
             st.pack(&p_, &pc);
             p_.flush(&pc);
+        }
+
+        uint64_t hash() const {
+            return CityHash64((char*) p_.bytes_, sizeof(p_.bytes_));
         }
 
         bool operator==(const Packed& other) const {
