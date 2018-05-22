@@ -186,65 +186,18 @@ private:
         new_states->clear();
     }
 
-    template<class Stream>
-    struct StreamMultiplexer {
-        StreamMultiplexer(const Keys& keys) {
-            for (int run = 0; run < keys.runs(); ++run) {
-                auto runinfo = keys.run(run);
-                if (runinfo.first != runinfo.second) {
-                    auto stream = new Stream(keys.begin() + runinfo.first,
-                                             keys.begin() + runinfo.second);
-                    assert(stream->next());
-                    streams_.push(stream);
-                }
+
+    template<class Stream, class Interleaver, class T>
+    void add_stream_runs(Interleaver* combiner, const T& array) {
+        for (int run = 0; run < array.runs(); ++run) {
+            auto runinfo = array.run(run);
+            if (runinfo.first != runinfo.second) {
+                auto stream = new Stream(array.begin() + runinfo.first,
+                                         array.begin() + runinfo.second);
+                combiner->add_stream(stream);
             }
         }
-
-        ~StreamMultiplexer() {
-            while (!streams_.empty()) {
-                delete streams_.top();
-                streams_.pop();
-            }
-        }
-
-        bool next() {
-            if (streams_.empty()) {
-                return false;
-            }
-
-            auto top_stream = streams_.top();
-            Key value = top_stream->value();
-            streams_.pop();
-            if (top_stream->next()) {
-                streams_.push(top_stream);
-            } else {
-                delete top_stream;
-            }
-
-            if (value == top_) {
-                return next();
-            }
-
-            top_ = value;
-            return true;
-        }
-
-        const Key& value() const {
-            return top_;
-        }
-
-    private:
-        Key top_;
-        bool empty_ = false;
-
-        struct Cmp {
-            bool operator()(const Stream* a, const Stream* b) {
-                return *b < *a;
-            }
-        };
-
-        std::priority_queue<Stream*, std::vector<Stream*>, Cmp> streams_;
-    };
+    }
 
     size_t dedup(Keys* seen_keys, Values* seen_values,
                  const Keys& new_keys, const Values &new_values) {
@@ -253,8 +206,11 @@ private:
         using KeyStream = StructureDeltaDecompressorStream<Key>;
 
         if (new_keys.size()) {
-            StreamMultiplexer<KeyStream> seen_keys_stream { *seen_keys };
-            StreamMultiplexer<KeyStream> new_keys_stream { new_keys };
+            SortedStreamInterleaver<Key, KeyStream> seen_keys_stream;
+            SortedStreamInterleaver<Key, KeyStream> new_keys_stream;
+            add_stream_runs<KeyStream>(&seen_keys_stream, *seen_keys);
+            add_stream_runs<KeyStream>(&new_keys_stream, new_keys);
+
             new_keys_stream.next();
 
             size_t i = 0;
@@ -282,7 +238,8 @@ private:
         seen_keys->start_run();
         seen_values->start_run();
 
-        StreamMultiplexer<KeyStream> new_keys_stream { new_keys };
+        SortedStreamInterleaver<Key, KeyStream> new_keys_stream;
+        add_stream_runs<KeyStream>(&new_keys_stream, new_keys);
         for (int i = 0; new_keys_stream.next(); ++i) {
             if (!discard[i]) {
                 ++count;

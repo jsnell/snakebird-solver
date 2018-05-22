@@ -40,4 +40,62 @@ struct MeasureTime {
     typename Clock::time_point start_;
 };
 
+template<class T, class Stream, bool DeleteDuplicates=true>
+struct SortedStreamInterleaver {
+    SortedStreamInterleaver() {
+    }
+
+    ~SortedStreamInterleaver() {
+        while (!streams_.empty()) {
+            delete streams_.top();
+            streams_.pop();
+        }
+    }
+
+    void add_stream(Stream* stream) {
+        assert(stream->next());
+        streams_.push(stream);
+    }
+
+    bool next() {
+        if (streams_.empty()) {
+            return false;
+        }
+
+        auto top_stream = streams_.top();
+        T value = top_stream->value();
+        streams_.pop();
+        if (top_stream->next()) {
+            streams_.push(top_stream);
+        } else {
+            delete top_stream;
+        }
+
+        if (DeleteDuplicates) {
+            if (value == top_) {
+                return next();
+            }
+        }
+
+        top_ = value;
+        return true;
+    }
+
+    const T& value() const {
+        return top_;
+    }
+
+private:
+    T top_;
+    bool empty_ = false;
+
+    struct Cmp {
+        bool operator()(const Stream* a, const Stream* b) {
+            return *b < *a;
+        }
+    };
+
+    std::priority_queue<Stream*, std::vector<Stream*>, Cmp> streams_;
+};
+
 #endif
