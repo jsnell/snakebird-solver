@@ -70,6 +70,11 @@ public:
     }
 
 private:
+    ByteArrayDeltaDecompressor(
+        const ByteArrayDeltaDecompressor& other) = delete;
+    ByteArrayDeltaDecompressor& operator=(
+        const ByteArrayDeltaDecompressor& other) = delete;
+
     void unpack_internal(uint8_t output[Length]) {
         uint64_t n = VarInt<Length>::decode(it_);
         while (n) {
@@ -118,6 +123,10 @@ public:
     }
 
 private:
+    ByteArrayDeltaCompressor(const ByteArrayDeltaCompressor& other) = delete;
+    ByteArrayDeltaCompressor& operator=(
+        const ByteArrayDeltaCompressor& other) = delete;
+
     void record(uint8_t byte) {
         if (Compress) {
             delta_transformed_.push_back(byte);
@@ -180,6 +189,10 @@ public:
     }
 
 private:
+    StructureDeltaDecompressorStream(const StructureDeltaDecompressorStream& other) = delete;
+    StructureDeltaDecompressorStream& operator=(
+        const StructureDeltaDecompressorStream& other) = delete;
+
     int id_ = 0;
     T value_;
     bool empty_ = false;
