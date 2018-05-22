@@ -204,6 +204,8 @@ private:
         std::vector<bool> discard(new_values.size());
 
         using KeyStream = StructureDeltaDecompressorStream<Key>;
+        using ValueStream = PointerStream<Value>;
+        using PairStream = StreamPairer<Key, Value, KeyStream, ValueStream>;
 
         if (new_keys.size()) {
             SortedStreamInterleaver<Key, KeyStream> seen_keys_stream;
@@ -238,13 +240,29 @@ private:
         seen_keys->start_run();
         seen_values->start_run();
 
-        SortedStreamInterleaver<Key, KeyStream> new_keys_stream;
-        add_stream_runs<KeyStream>(&new_keys_stream, new_keys);
-        for (int i = 0; new_keys_stream.next(); ++i) {
+
+        SortedStreamInterleaver<typename PairStream::Pair, PairStream>
+            new_state_stream;
+        for (int run = 0; run < new_keys.runs(); ++run) {
+            auto keyinfo = new_keys.run(run);
+            auto valinfo = new_values.run(run);
+            if (keyinfo.first != keyinfo.second) {
+                auto keystream =
+                    new KeyStream(new_keys.begin() + keyinfo.first,
+                                  new_keys.begin() + keyinfo.second);
+                auto valstream =
+                    new ValueStream(new_values.begin() + valinfo.first,
+                                    new_values.begin() + valinfo.second);
+                new_state_stream.add_stream(new PairStream(keystream,
+                                                           valstream));
+            }
+        }
+
+        for (int i = 0; new_state_stream.next(); ++i) {
             if (!discard[i]) {
                 ++count;
-                compress.pack(new_keys_stream.value().p_.bytes_);
-                seen_values->push_back(new_values[i]);
+                compress.pack(new_state_stream.value().first.p_.bytes_);
+                seen_values->push_back(new_state_stream.value().second);
             }
         }
 
