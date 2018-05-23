@@ -116,7 +116,26 @@ private:
 
 template<class K, class V, class KeyStream, class ValueStream>
 struct StreamPairer {
-    using Pair = std::pair<K, V>;
+    // Like std::pair, except comparisons only affect "first".
+    class Pair {
+    public:
+        Pair() {
+        }
+
+        Pair(const K& key, V value)
+            : first(key), second(value) {
+        }
+
+        bool operator<(const Pair& other) const {
+            return first < other.first;
+        }
+        bool operator==(const Pair& other) const {
+            return first == other.first;
+        }
+
+        K first;
+        V second;
+    };
 
     StreamPairer(KeyStream* keys, ValueStream* values)
         : keys_(keys),

@@ -47,15 +47,20 @@ public:
 
         seen_keys.freeze();
 
+        size_t new_state_count = 0;
         for (int iter = 0; ; ++iter) {
             Policy::start_iteration(iter);
 
             {
-                printf("  new states: %ld\n", new_states.size());
+                new_state_count += new_states.size();
                 pack_pairs(&new_states, &new_keys, &new_values);
                 new_keys.freeze();
                 new_values.freeze();
             }
+
+            printf("  new states: %ld\n", new_state_count);
+            new_state_count = 0;
+            fflush(stdout);
 
             {
                 int uniq = dedup(&seen_keys, &seen_values, new_keys, new_values);
@@ -99,6 +104,7 @@ public:
                                       return false;
                                   });
                 if (new_states.size() > 100000000) {
+                    new_state_count += new_states.size();
                     pack_pairs(&new_states, &new_keys, &new_values);
                 }
             }
