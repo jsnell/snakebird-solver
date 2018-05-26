@@ -170,9 +170,9 @@ public:
         run_ends_.push_back(size_);
     }
 
-    std::pair<size_t, size_t> run(int i) const {
-        return std::make_pair(run_starts_[i],
-                              run_ends_[i]);
+    std::pair<T*, T*> run(int i) const {
+        return std::make_pair(run_starts_[i] + array_,
+                              run_ends_[i] + array_);
     }
 
     int runs() const {

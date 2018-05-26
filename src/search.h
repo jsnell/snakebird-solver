@@ -80,9 +80,8 @@ public:
                 return 0;
             }
 
-            StructureDeltaDecompressorStream<Key> stream(
-                seen_keys.begin() + todo.first,
-                seen_keys.begin() + todo.second);
+            StructureDeltaDecompressorStream<Key> stream(todo.first,
+                                                         todo.second);
 
             while (stream.next()) {
                 State st(stream.value());
@@ -128,9 +127,8 @@ private:
             Policy::trace(setup, State(target.first), i);
 
             auto runinfo = seen_keys.run(i - 1);
-            StructureDeltaDecompressorStream<Key> stream(
-                seen_keys.begin() + runinfo.first,
-                seen_keys.begin() + runinfo.second);
+            StructureDeltaDecompressorStream<Key> stream(runinfo.first,
+                                                         runinfo.second);
 
             bool found_next = false;
             for (int j = 0; stream.next(); ++j) {
@@ -151,7 +149,7 @@ private:
                                           }
                                           return false;
                                       })) {
-                    const auto& value = seen_values[seen_values.run(i - 1).first + j];
+                    const auto& value = seen_values.run(i - 1).first[j];
                     target = st_pair(key, value);
                     found_next = true;
                     break;
@@ -198,8 +196,7 @@ private:
         for (int run = 0; run < array.runs(); ++run) {
             auto runinfo = array.run(run);
             if (runinfo.first != runinfo.second) {
-                auto stream = new Stream(array.begin() + runinfo.first,
-                                         array.begin() + runinfo.second);
+                auto stream = new Stream(runinfo.first, runinfo.second);
                 combiner->add_stream(stream);
             }
         }
@@ -254,11 +251,9 @@ private:
             auto valinfo = new_values.run(run);
             if (keyinfo.first != keyinfo.second) {
                 auto keystream =
-                    new KeyStream(new_keys.begin() + keyinfo.first,
-                                  new_keys.begin() + keyinfo.second);
+                    new KeyStream(keyinfo.first, keyinfo.second);
                 auto valstream =
-                    new ValueStream(new_values.begin() + valinfo.first,
-                                    new_values.begin() + valinfo.second);
+                    new ValueStream(valinfo.first, valinfo.second);
                 new_state_stream.add_stream(new PairStream(keystream,
                                                            valstream));
             }
