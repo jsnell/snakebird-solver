@@ -48,12 +48,11 @@ public:
 template<int Length, bool Compress=false>
 class ByteArrayDeltaDecompressor {
 public:
-    ByteArrayDeltaDecompressor(const uint8_t* begin, const uint8_t* end) {
+    ByteArrayDeltaDecompressor(const uint8_t* begin, const uint8_t* end)
+        : raw_begin(begin),
+          raw_end(end) {
         if (Compress) {
-            snappy::Uncompress((char*) begin, std::distance(begin, end),
-                               &uncompressed_);
-            it_ = (const uint8_t*) uncompressed_.data();
-            end_ = it_ + uncompressed_.size();
+            reopen_snappy();
         } else {
             it_ = begin;
             end_ = end;
@@ -61,7 +60,7 @@ public:
     }
 
     bool unpack(uint8_t value[Length]) {
-        if (it_ == end_) {
+        if (it_ == end_ && !reopen_snappy()) {
             return false;
         }
         unpack_internal(value);
@@ -74,6 +73,22 @@ private:
         const ByteArrayDeltaDecompressor& other) = delete;
     ByteArrayDeltaDecompressor& operator=(
         const ByteArrayDeltaDecompressor& other) = delete;
+
+    bool reopen_snappy() {
+        if (!Compress ||
+            raw_begin == raw_end) {
+            return false;
+        }
+
+        uint16_t len = *raw_begin++;
+        len |= (*raw_begin++) << 8;
+        assert(raw_begin + len <= raw_end);
+        snappy::Uncompress((char*) raw_begin, len, &uncompressed_);
+        it_ = (const uint8_t*) uncompressed_.data();
+        end_ = it_ + uncompressed_.size();
+        raw_begin += len;
+        return true;
+    }
 
     void unpack_internal(uint8_t output[Length]) {
         uint64_t n = VarInt<Length>::decode(it_);
@@ -88,6 +103,8 @@ private:
     std::string uncompressed_;
     const uint8_t* it_;
     const uint8_t* end_;
+    const uint8_t* raw_begin;
+    const uint8_t* raw_end;
 };
 
 template<int Length, bool Compress, class Output>
@@ -114,6 +131,10 @@ public:
                 prev_[j] = value[j];
             }
         }
+
+        if (Compress && delta_transformed_.size() > 0x7000) {
+            write_compressed();
+        }
     }
 
     void write() {
@@ -136,22 +157,17 @@ private:
     }
 
     void write_compressed() {
+        char buffer[65536];
+        snappy::UncheckedByteArraySink sink(buffer);
         snappy::ByteArraySource source((char*) &delta_transformed_[0],
-                                       delta_transformed_.size());
-        struct SnappySink : snappy::Sink {
-            SnappySink(Output* out) : out(out) {
-            };
-
-            virtual void Append(const char* bytes, size_t n) override {
-                for (int i = 0; i < n; ++i) {
-                    out->push_back(bytes[i]);
-                }
-            }
-
-            Output* out;
-        };
-        SnappySink sink(output_);
-        snappy::Compress(&source, &sink);
+                                           delta_transformed_.size());
+        size_t len = snappy::Compress(&source, &sink);
+        output_->push_back(len & 0xff);
+        output_->push_back((len >> 8) & 0xff);
+        for (size_t i = 0; i < len; ++i) {
+            output_->push_back(buffer[i]);
+        }
+        delta_transformed_.clear();
     }
 
     uint8_t prev_[Length] = { 0 };
@@ -159,7 +175,7 @@ private:
     Output* output_;
 };
 
-template<class T>
+template<class T, bool Decompress = false>
 class StructureDeltaDecompressorStream {
 public:
     StructureDeltaDecompressorStream(const uint8_t* begin,
@@ -195,7 +211,7 @@ private:
     int id_ = 0;
     T value_;
     bool empty_ = false;
-    ByteArrayDeltaDecompressor<sizeof(T::p_.bytes_)> stream_;
+    ByteArrayDeltaDecompressor<sizeof(T::p_.bytes_), Decompress> stream_;
 };
 
 

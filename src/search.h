@@ -32,8 +32,11 @@ public:
     using NewStates = std::vector<st_pair>;
     using KeyRun = Keys::Run;
 
-    using KeyStream = StructureDeltaDecompressorStream<Key>;
+    using KeyStream = StructureDeltaDecompressorStream<Key, true>;
     using ValueStream = PointerStream<Value>;
+    using KeyCompressor = ByteArrayDeltaCompressor<sizeof(Key::p_.bytes_),
+                                                   true,
+                                                   Keys>;
 
     int search(State start_state, const Setup& setup) {
         State null_state;
@@ -98,23 +101,23 @@ public:
             }
 
             if (uncompacted_runs >= 8 &&
-                uncompacted_states >= 10000) {
+                uncompacted_states >= 1000000) {
                 std::vector<KeyRun> to_compact = seen_keys.runs();
                 to_compact.erase(to_compact.begin(),
                                  to_compact.end() - uncompacted_runs);
+                auto prevsize = compacted_seen_keys.size();
                 compact_runs(&compacted_seen_keys, to_compact);
                 printf("Compacted %ld runs with %ld states, "
                        "orig bytes: %ld new bytes: %ld\n",
                        uncompacted_runs,
                        uncompacted_states,
-                       seen_keys.size(),
-                       compacted_seen_keys.size());
+                       (to_compact.back().second - to_compact.front().first),
+                       compacted_seen_keys.size() - prevsize);
                 uncompacted_runs = 0;
                 uncompacted_states = 0;
             }
 
-            StructureDeltaDecompressorStream<Key> stream(todo.first,
-                                                         todo.second);
+            KeyStream stream(todo.first, todo.second);
 
             while (stream.next()) {
                 State st(stream.value());
@@ -160,8 +163,7 @@ private:
             Policy::trace(setup, State(target.first), i);
 
             auto runinfo = seen_keys.run(i - 1);
-            StructureDeltaDecompressorStream<Key> stream(runinfo.first,
-                                                         runinfo.second);
+            KeyStream stream(runinfo.first, runinfo.second);
 
             bool found_next = false;
             for (int j = 0; stream.next(); ++j) {
@@ -205,9 +207,7 @@ private:
 
         new_keys->start_run();
         new_values->start_run();
-        ByteArrayDeltaCompressor<sizeof(Key::p_.bytes_),
-                                 false,
-                                 Keys> compress { new_keys };
+        KeyCompressor compress { new_keys };
         for (const auto& pair : *new_states) {
             if (pair.first == prev) {
                 continue;
@@ -217,6 +217,7 @@ private:
             new_values->push_back(pair.second);
             prev = pair.first;
         }
+        compress.write();
         new_keys->end_run();
         new_values->end_run();
 
@@ -267,15 +268,12 @@ private:
             ;
         }
 
-        ByteArrayDeltaCompressor<sizeof(Key::p_.bytes_),
-                                 false,
-                                 Keys> compress { seen_keys };
+        KeyCompressor compress { seen_keys };
 
         size_t count = 0;
         seen_keys->thaw();
         seen_keys->start_run();
         seen_values->start_run();
-
 
         SortedStreamInterleaver<typename PairStream::Pair, PairStream>
             new_state_stream;
@@ -315,9 +313,7 @@ private:
         output->thaw();
         output->start_run();
 
-        ByteArrayDeltaCompressor<sizeof(Key::p_.bytes_),
-                                 false,
-                                 Keys> compress { output };
+        KeyCompressor compress { output };
 
         size_t count = 0;
         for (; stream.next(); ++count) {
