@@ -175,6 +175,16 @@ public:
                               run_ends_[i] + array_);
     }
 
+    using Run = std::pair<const T*, const T*>;
+    std::vector<Run> runs() const {
+        std::vector<Run> ret;
+        for (int i = 0; i < run_count(); ++i) {
+            ret.push_back(std::make_pair(begin() + run_starts_[i],
+                                         begin() + run_ends_[i]));
+        }
+        return ret;
+    }
+
     int run_count() const {
         return run_ends_.size();
     }

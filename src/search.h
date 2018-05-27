@@ -30,6 +30,7 @@ public:
     using Keys = file_backed_mmap_array<uint8_t>;
     using Values = file_backed_mmap_array<uint8_t>;
     using NewStates = std::vector<st_pair>;
+    using KeyRun = Keys::Run;
 
     int search(State start_state, const Setup& setup) {
         State null_state;
@@ -191,12 +192,12 @@ private:
     }
 
 
-    template<class Stream, class Interleaver, class T>
-    void add_stream_runs(Interleaver* combiner, const T& array) {
-        for (int run = 0; run < array.run_count(); ++run) {
-            auto runinfo = array.run(run);
-            if (runinfo.first != runinfo.second) {
-                auto stream = new Stream(runinfo.first, runinfo.second);
+    template<class Stream, class Interleaver>
+    void add_stream_runs(Interleaver* combiner,
+                         const std::vector<KeyRun>& runs) {
+        for (auto run : runs) {
+            if (run.first != run.second) {
+                auto stream = new Stream(run.first, run.second);
                 combiner->add_stream(stream);
             }
         }
@@ -213,8 +214,8 @@ private:
         if (new_keys.size()) {
             SortedStreamInterleaver<Key, KeyStream> seen_keys_stream;
             SortedStreamInterleaver<Key, KeyStream> new_keys_stream;
-            add_stream_runs<KeyStream>(&seen_keys_stream, *seen_keys);
-            add_stream_runs<KeyStream>(&new_keys_stream, new_keys);
+            add_stream_runs<KeyStream>(&seen_keys_stream, seen_keys->runs());
+            add_stream_runs<KeyStream>(&new_keys_stream, new_keys.runs());
 
             new_keys_stream.next();
 
