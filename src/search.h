@@ -73,7 +73,7 @@ public:
                 break;
             }
 
-            auto todo = seen_keys.run(seen_keys.runs() - 1);
+            auto todo = seen_keys.run(seen_keys.run_count() - 1);
 
             if (todo.first == todo.second) {
                 // We haven't won, and have no moves to process.
@@ -121,7 +121,7 @@ private:
                             const st_pair win_state) {
         st_pair target = win_state;
 
-        int depth = seen_keys.runs();
+        int depth = seen_keys.run_count();
 
         for (int i = depth - 1; i > 0; --i) {
             Policy::trace(setup, State(target.first), i);
@@ -193,7 +193,7 @@ private:
 
     template<class Stream, class Interleaver, class T>
     void add_stream_runs(Interleaver* combiner, const T& array) {
-        for (int run = 0; run < array.runs(); ++run) {
+        for (int run = 0; run < array.run_count(); ++run) {
             auto runinfo = array.run(run);
             if (runinfo.first != runinfo.second) {
                 auto stream = new Stream(runinfo.first, runinfo.second);
@@ -246,7 +246,7 @@ private:
 
         SortedStreamInterleaver<typename PairStream::Pair, PairStream>
             new_state_stream;
-        for (int run = 0; run < new_keys.runs(); ++run) {
+        for (int run = 0; run < new_keys.run_count(); ++run) {
             auto keyinfo = new_keys.run(run);
             auto valinfo = new_values.run(run);
             if (keyinfo.first != keyinfo.second) {

@@ -175,7 +175,7 @@ public:
                               run_ends_[i] + array_);
     }
 
-    int runs() const {
+    int run_count() const {
         return run_ends_.size();
     }
 
