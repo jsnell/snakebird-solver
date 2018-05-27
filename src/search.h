@@ -32,6 +32,9 @@ public:
     using NewStates = std::vector<st_pair>;
     using KeyRun = Keys::Run;
 
+    using KeyStream = StructureDeltaDecompressorStream<Key>;
+    using ValueStream = PointerStream<Value>;
+
     int search(State start_state, const Setup& setup) {
         State null_state;
 
@@ -44,9 +47,14 @@ public:
         bool win = false;
         st_pair win_state { null_state, 0 };
 
+        Keys compacted_seen_keys;
+        size_t uncompacted_runs = 0;
+        size_t uncompacted_states = 0;
+
         new_states.emplace_back(start_state, 0);
 
         seen_keys.freeze();
+        compacted_seen_keys.freeze();
 
         size_t new_state_count = 0;
         for (int iter = 0; ; ++iter) {
@@ -64,7 +72,15 @@ public:
             fflush(stdout);
 
             {
-                int uniq = dedup(&seen_keys, &seen_values, new_keys, new_values);
+                std::vector<KeyRun> runs = compacted_seen_keys.runs();
+                std::vector<KeyRun> uncompacted = seen_keys.runs();
+                runs.insert(runs.end(),
+                            uncompacted.end() - uncompacted_runs,
+                            uncompacted.end());
+                int uniq = dedup(&seen_keys, &seen_values, runs,
+                                 new_keys, new_values);
+                uncompacted_states += uniq;
+                uncompacted_runs++;
                 printf("  new unique: %d\n", uniq);
                 new_keys.reset();
                 new_values.reset();
@@ -79,6 +95,22 @@ public:
             if (todo.first == todo.second) {
                 // We haven't won, and have no moves to process.
                 return 0;
+            }
+
+            if (uncompacted_runs >= 8 &&
+                uncompacted_states >= 10000) {
+                std::vector<KeyRun> to_compact = seen_keys.runs();
+                to_compact.erase(to_compact.begin(),
+                                 to_compact.end() - uncompacted_runs);
+                compact_runs(&compacted_seen_keys, to_compact);
+                printf("Compacted %ld runs with %ld states, "
+                       "orig bytes: %ld new bytes: %ld\n",
+                       uncompacted_runs,
+                       uncompacted_states,
+                       seen_keys.size(),
+                       compacted_seen_keys.size());
+                uncompacted_runs = 0;
+                uncompacted_states = 0;
             }
 
             StructureDeltaDecompressorStream<Key> stream(todo.first,
@@ -204,17 +236,17 @@ private:
     }
 
     size_t dedup(Keys* seen_keys, Values* seen_values,
+                 const std::vector<KeyRun>& seen_keys_runs,
                  const Keys& new_keys, const Values &new_values) {
         std::vector<bool> discard(new_values.size());
 
-        using KeyStream = StructureDeltaDecompressorStream<Key>;
-        using ValueStream = PointerStream<Value>;
         using PairStream = StreamPairer<Key, Value, KeyStream, ValueStream>;
 
         if (new_keys.size()) {
             SortedStreamInterleaver<Key, KeyStream> seen_keys_stream;
             SortedStreamInterleaver<Key, KeyStream> new_keys_stream;
-            add_stream_runs<KeyStream>(&seen_keys_stream, seen_keys->runs());
+            add_stream_runs<KeyStream>(&seen_keys_stream,
+                                       seen_keys_runs);
             add_stream_runs<KeyStream>(&new_keys_stream, new_keys.runs());
 
             new_keys_stream.next();
@@ -273,6 +305,29 @@ private:
         seen_keys->end_run();
         seen_values->end_run();
 
+        return count;
+    }
+
+    size_t compact_runs(Keys* output,
+                        const std::vector<KeyRun>& runs) {
+        SortedStreamInterleaver<Key, KeyStream> stream;
+        add_stream_runs<KeyStream>(&stream, runs);
+        output->thaw();
+        output->start_run();
+
+        ByteArrayDeltaCompressor<sizeof(Key::p_.bytes_),
+                                 false,
+                                 Keys> compress { output };
+
+        size_t count = 0;
+        for (; stream.next(); ++count) {
+            compress.pack(stream.value().p_.bytes_);
+        }
+
+        compress.write();
+
+        output->end_run();
+        output->freeze();
         return count;
     }
 };
