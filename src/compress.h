@@ -113,6 +113,10 @@ public:
     ByteArrayDeltaCompressor(Output* output) : output_(output) {
     }
 
+    ~ByteArrayDeltaCompressor() {
+        flush();
+    }
+
     void pack(const uint8_t value[Length]) {
         uint64_t n = 0;
         for (int j = 0; j < Length; ++j) {
@@ -132,14 +136,18 @@ public:
             }
         }
 
-        if (Compress && delta_transformed_.size() > 0x7000) {
-            write_compressed();
+        if (delta_transformed_.size() > 0x7000) {
+            flush();
         }
     }
 
-    void write() {
+    void flush() {
         if (Compress) {
-            write_compressed();
+            compress_and_flush();
+        } else {
+            output_->insert_back(delta_transformed_.begin(),
+                                 delta_transformed_.end());
+            delta_transformed_.clear();
         }
     }
 
@@ -149,14 +157,10 @@ private:
         const ByteArrayDeltaCompressor& other) = delete;
 
     void record(uint8_t byte) {
-        if (Compress) {
-            delta_transformed_.push_back(byte);
-        } else {
-            output_->push_back(byte);
-        }
+        delta_transformed_.push_back(byte);
     }
 
-    void write_compressed() {
+    void compress_and_flush() {
         char buffer[65536];
         snappy::UncheckedByteArraySink sink(buffer);
         snappy::ByteArraySource source((char*) &delta_transformed_[0],
@@ -164,9 +168,7 @@ private:
         size_t len = snappy::Compress(&source, &sink);
         output_->push_back(len & 0xff);
         output_->push_back((len >> 8) & 0xff);
-        for (size_t i = 0; i < len; ++i) {
-            output_->push_back(buffer[i]);
-        }
+        output_->insert_back(&buffer[0], &buffer[len]);
         delta_transformed_.clear();
     }
 

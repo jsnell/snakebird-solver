@@ -207,17 +207,18 @@ private:
 
         new_keys->start_run();
         new_values->start_run();
-        KeyCompressor compress { new_keys };
-        for (const auto& pair : *new_states) {
-            if (pair.first == prev) {
-                continue;
-            }
+        {
+            KeyCompressor compress { new_keys };
+            for (const auto& pair : *new_states) {
+                if (pair.first == prev) {
+                    continue;
+                }
 
-            compress.pack(pair.first.p_.bytes_);
-            new_values->push_back(pair.second);
-            prev = pair.first;
+                compress.pack(pair.first.p_.bytes_);
+                new_values->push_back(pair.second);
+                prev = pair.first;
+            }
         }
-        compress.write();
         new_keys->end_run();
         new_values->end_run();
 
@@ -268,8 +269,6 @@ private:
             ;
         }
 
-        KeyCompressor compress { seen_keys };
-
         size_t count = 0;
         seen_keys->thaw();
         seen_keys->start_run();
@@ -290,15 +289,17 @@ private:
             }
         }
 
-        for (int i = 0; new_state_stream.next(); ++i) {
-            if (!discard[i]) {
-                ++count;
-                compress.pack(new_state_stream.value().first.p_.bytes_);
-                seen_values->push_back(new_state_stream.value().second);
+        {
+            KeyCompressor compress { seen_keys };
+            for (int i = 0; new_state_stream.next(); ++i) {
+                if (!discard[i]) {
+                    ++count;
+                    compress.pack(new_state_stream.value().first.p_.bytes_);
+                    seen_values->push_back(new_state_stream.value().second);
+                }
             }
         }
 
-        compress.write();
         seen_keys->freeze();
         seen_keys->end_run();
         seen_values->end_run();
@@ -313,14 +314,14 @@ private:
         output->thaw();
         output->start_run();
 
-        KeyCompressor compress { output };
-
         size_t count = 0;
-        for (; stream.next(); ++count) {
-            compress.pack(stream.value().p_.bytes_);
-        }
 
-        compress.write();
+        {
+            KeyCompressor compress { output };
+            for (; stream.next(); ++count) {
+                compress.pack(stream.value().p_.bytes_);
+            }
+        }
 
         output->end_run();
         output->freeze();

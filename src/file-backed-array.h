@@ -125,14 +125,14 @@ public:
     void push_back(const T& data) {
         assert(!frozen_);
         buffer_.push_back(data);
-        if (buffer_.size() >= kFlushThreshold) {
-            if (fd_ == -1) {
-                open();
-            }
-            flush();
-            buffer_.clear();
-        }
+        maybe_flush();
         size_++;
+    }
+
+    template<class It>
+    void insert_back(const It begin, const It end) {
+        buffer_.insert(buffer_.end(), begin, end);
+        size_ += std::distance(begin, end);
     }
 
     void freeze() {
@@ -195,6 +195,16 @@ public:
     }
 
 private:
+    void maybe_flush() {
+        if (buffer_.size() >= kFlushThreshold) {
+            if (fd_ == -1) {
+                open();
+            }
+            flush();
+            buffer_.clear();
+        }
+    }
+
     void maybe_map(int prot, int flags) {
         assert(!frozen_);
         if (fd_ >= 0 && size_ > 0) {
