@@ -7,8 +7,7 @@
 #include <string>
 #include <vector>
 
-#include <third-party/snappy/snappy.h>
-#include <third-party/snappy/snappy-sinksource.h>
+#include <zstd.h>
 
 template<int Width>
 class VarInt {
@@ -52,7 +51,7 @@ public:
         : raw_begin(begin),
           raw_end(end) {
         if (Compress) {
-            reopen_snappy();
+            refill();
         } else {
             it_ = begin;
             end_ = end;
@@ -60,7 +59,7 @@ public:
     }
 
     bool unpack(uint8_t value[Length]) {
-        if (it_ == end_ && !reopen_snappy()) {
+        if (it_ == end_ && !refill()) {
             return false;
         }
         unpack_internal(value);
@@ -74,7 +73,7 @@ private:
     ByteArrayDeltaDecompressor& operator=(
         const ByteArrayDeltaDecompressor& other) = delete;
 
-    bool reopen_snappy() {
+    bool refill() {
         if (!Compress ||
             raw_begin == raw_end) {
             return false;
@@ -83,9 +82,18 @@ private:
         uint16_t len = *raw_begin++;
         len |= (*raw_begin++) << 8;
         assert(raw_begin + len <= raw_end);
-        snappy::Uncompress((char*) raw_begin, len, &uncompressed_);
-        it_ = (const uint8_t*) uncompressed_.data();
-        end_ = it_ + uncompressed_.size();
+        size_t zsize = ZSTD_getFrameContentSize(raw_begin,
+                                                std::distance(raw_begin,
+                                                              raw_end));
+        if (zbuffer_.size() < zsize) {
+            zbuffer_.resize(zsize);
+        }
+        ZSTD_decompress(&zbuffer_[0],
+                        zsize,
+                        raw_begin,
+                        std::distance(raw_begin, raw_end));
+        it_ = &zbuffer_[0];
+        end_ = it_ + zsize;
         raw_begin += len;
         return true;
     }
@@ -100,7 +108,7 @@ private:
         }
     }
 
-    std::string uncompressed_;
+    std::vector<uint8_t> zbuffer_;
     const uint8_t* it_;
     const uint8_t* end_;
     const uint8_t* raw_begin;
@@ -162,10 +170,10 @@ private:
 
     void compress_and_flush() {
         char buffer[65536];
-        snappy::UncheckedByteArraySink sink(buffer);
-        snappy::ByteArraySource source((char*) &delta_transformed_[0],
-                                           delta_transformed_.size());
-        size_t len = snappy::Compress(&source, &sink);
+        size_t len = ZSTD_compress(buffer, sizeof(buffer),
+                                   &delta_transformed_[0],
+                                   delta_transformed_.size(),
+                                   0);
         output_->push_back(len & 0xff);
         output_->push_back((len >> 8) & 0xff);
         output_->insert_back(&buffer[0], &buffer[len]);
