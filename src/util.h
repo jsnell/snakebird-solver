@@ -19,7 +19,7 @@ struct integer_length<1> {
 };
 
 constexpr uint64_t mask_n_bits(uint64_t n) {
-    return (1 << n) - 1;
+    return (UINT64_C(1) << n) - 1;
 }
 
 template<class Clock=typename std::chrono::high_resolution_clock>
