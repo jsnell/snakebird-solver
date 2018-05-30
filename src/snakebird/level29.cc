@@ -24,6 +24,6 @@ int main() {
     St st(map);
     st.print(map);
 
-    EXPECT_EQ(15, search(st, map));
+    EXPECT_EQ(45, search(st, map));
     return 0;
 }
