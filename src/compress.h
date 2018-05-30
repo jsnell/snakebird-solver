@@ -21,7 +21,7 @@ public:
             if (!(byte & (1 << 7))) {
                 return byte;
             }
-            return byte | (*it++ << 7);
+            return (byte & 0x7f) | (*it++ << 7);
         }
         assert(false);
     }
