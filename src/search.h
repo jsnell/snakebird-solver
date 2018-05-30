@@ -20,7 +20,8 @@ struct BFSPolicy {
 
 template<class State, class Setup,
          class Policy = BFSPolicy<State, Setup>,
-         class PackedState = typename State::Packed>
+         class PackedState = typename State::Packed,
+         bool Compress = false>
 class BreadthFirstSearch {
 public:
     using Key = PackedState;
@@ -32,10 +33,10 @@ public:
     using NewStates = std::vector<st_pair>;
     using KeyRun = Keys::Run;
 
-    using KeyStream = StructureDeltaDecompressorStream<Key, true>;
+    using KeyStream = StructureDeltaDecompressorStream<Key, Compress>;
     using ValueStream = PointerStream<Value>;
     using KeyCompressor = ByteArrayDeltaCompressor<sizeof(Key::p_.bytes_),
-                                                   true,
+                                                   Compress,
                                                    Keys>;
 
     int search(State start_state, const Setup& setup) {
