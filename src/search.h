@@ -21,7 +21,7 @@ struct BFSPolicy {
 template<class State, class Setup,
          class Policy = BFSPolicy<State, Setup>,
          class PackedState = typename State::Packed,
-         bool Compress = false>
+         bool Compress = true>
 class BreadthFirstSearch {
 public:
     using Key = PackedState;
