@@ -207,6 +207,9 @@ public:
     }
 
     void pack(const uint8_t value[Length]) {
+        // Compute a bitmask with bit N set if byte N is different
+        // between "value" and the "value" given on the previous
+        // call.
         uint64_t n = 0;
         for (int j = 0; j < Length; ++j) {
             if (prev_[j] != value[j]) {
@@ -218,8 +221,14 @@ public:
                                [this] (uint8_t value) {
                                    record(value);
                                });
+        // Emit only the changed bytes.
         for (int j = 0; j < Length; ++j) {
             if (n & (1 << j)) {
+                // It's tempting to compute some kind of numeric
+                // delta here, either with xor or plus/minus. Seems
+                // like that should in theory be easier to compress
+                // with the later passes. But it didn't work for me
+                // in practice.
                 record(value[j]);
                 prev_[j] = value[j];
             }
@@ -245,10 +254,15 @@ private:
     ByteArrayDeltaCompressor& operator=(
         const ByteArrayDeltaCompressor& other) = delete;
 
+    // Buffer a byte for possible zstd compression.
     void record(uint8_t byte) {
         delta_transformed_.push_back(byte);
     }
 
+    // Compress the internal accumulator buffer with zstd and write to
+    // the result to the output. The compressed data will be prefixed
+    // with a Varint representation of the length of the compressed
+    // block.
     void compress_and_flush() {
         char buffer[1 << 22];
         size_t len = ZSTD_compress(buffer, sizeof(buffer),
@@ -267,15 +281,20 @@ private:
     Output* output_;
 };
 
+// Given a byte range that's compressed/encoded as above, converts it
+// the range to a lazy stream of records of type T.
 template<class T, bool Decompress = false>
 class StructureDeltaDecompressorStream {
 public:
+    // Does not take ownership of the range.
     StructureDeltaDecompressorStream(const uint8_t* begin,
-                                     const uint8_t* end,
-                                     int id = 0)
-        : id_(id), stream_(begin, end) {
+                                     const uint8_t* end)
+        : stream_(begin, end) {
     }
 
+    // Returns a reference to the latest decoded record (may not be
+    // called if no records have been read yet). Valid only until next
+    // call to next().
     const T& value() const {
         return value_;
     }
@@ -284,6 +303,9 @@ public:
         return empty_;
     }
 
+    // Reads a record from the input byte array. Returns false iff
+    // no more records can be read. Once this returns false, the only
+    // method that may be called on this object is empty().
     bool next() {
         if (!stream_.unpack(value_.p_.bytes_)) {
             empty_ = true;
@@ -300,7 +322,6 @@ private:
     StructureDeltaDecompressorStream& operator=(
         const StructureDeltaDecompressorStream& other) = delete;
 
-    int id_ = 0;
     T value_;
     bool empty_ = false;
     ByteArrayDeltaDecompressor<sizeof(T::p_.bytes_), Decompress> stream_;
