@@ -31,6 +31,8 @@ struct BFSPolicy {
 //   state.
 // - win(): Returns true if the state is in a win condition.
 // - print(const Setup& setup): Prints the state to stdout.
+// - Must have a default constructor, which must represent a state
+//   that is not reachable from any other state.
 //
 // Setup: An opaque scenario description. A Setup object will be
 // threaded through all computations.
@@ -53,13 +55,26 @@ template<class State, class Setup,
          bool Compress = true>
 class BreadthFirstSearch {
 public:
+    // The serialized states are the main key type for our data structures.
     using Key = PackedState;
+    // The data associated with a Key (generally the hash-code of the
+    // parent state that generated the state).
     using Value = uint8_t;
     using st_pair = std::pair<Key, Value>;
 
+    // A sequence of serialized states. (Note that each state is
+    // likely to serialize to multiple bytes, so a single element of
+    // this array represents just a part of the state).
     using Keys = file_backed_mmap_array<uint8_t>;
+    // A sequence of values bound to states. It's expected that there
+    // is exactly one value per key, and that the values and keys are
+    // in the same order.
     using Values = file_backed_mmap_array<uint8_t>;
+    // The keys / values collected during a single iteration of the
+    // search.
     using NewStates = std::vector<st_pair>;
+    // A byte range point to a Keys array, indicating the start/end of
+    // a sorted sequence of keys.
     using KeyRun = Keys::Run;
 
     using KeyStream = StructureDeltaDecompressorStream<Key, Compress>;
@@ -68,22 +83,44 @@ public:
                                                    Compress,
                                                    Keys>;
 
+    // Execute a search from start_state to any win state.
     int search(State start_state, const Setup& setup) {
         State null_state;
 
         // BFS state
+
+        // The unique states that were generated at some earlier
+        // depth.  Each state will be in seen_keys just once. Each
+        // depth in the search will be represented as exactly one run
+        // in these arrays, with the run being sorted.
         Keys seen_keys;
+        // The values associated with the states in seen_keys, in the
+        // same order.
         Values seen_values;
+        // All states generated at the current depth.
+        NewStates new_states;
+        // The keys / values generated at the current depth, deduplicated
+        // and sorted by key.
         Keys new_keys;
         Values new_values;
-        NewStates new_states;
+        // True if a win condition has been found.
         bool win = false;
+        // The winning state. Only valid if win==true.
         st_pair win_state { null_state, 0 };
 
+        // An optimization. Keys will occasionally be copied from
+        // seen_keys to compacted_seen_keys, with the states of
+        // multiple runs from seen_keys being written out as a single
+        // sorted run in compacted_seen_keys. This makes merging the
+        // KeyStreams much faster, and also improves the compression
+        // ratio.
         Keys compacted_seen_keys;
+        // The number of runs / states in seen_keys that have not been
+        // written out to compacted_seen_keys yet.
         size_t uncompacted_runs = 0;
         size_t uncompacted_states = 0;
 
+        // Initialize our state queue with the starting state.
         new_states.emplace_back(start_state, 0);
 
         seen_keys.freeze();
@@ -93,6 +130,7 @@ public:
         for (int iter = 0; ; ++iter) {
             Policy::start_iteration(iter);
 
+            // Deduplicate the new states.
             {
                 new_state_count += new_states.size();
                 pack_pairs(&new_states, &new_keys, &new_values);
@@ -104,9 +142,16 @@ public:
             new_state_count = 0;
             fflush(stdout);
 
+            // Find all the new states that had never been generated
+            // at an earlier depth. These states will be written out
+            // to keys as a new run. All other new states will be
+            // discarded.
             {
                 std::vector<KeyRun> runs = compacted_seen_keys.runs();
                 std::vector<KeyRun> uncompacted = seen_keys.runs();
+                // The same data might be present in both seen_keys
+                // and compacted_seen_keys. Use the data from the latter
+                // when possible, then fill in the rest from the former.
                 runs.insert(runs.end(),
                             uncompacted.end() - uncompacted_runs,
                             uncompacted.end());
@@ -123,6 +168,7 @@ public:
                 break;
             }
 
+            // The latest run will contain all the new states.
             auto todo = seen_keys.run(seen_keys.run_count() - 1);
 
             if (todo.first == todo.second) {
@@ -130,6 +176,9 @@ public:
                 return 0;
             }
 
+            // If we've got too many separate runs in seen_keys, merge
+            // them together into a new run in compacted_seen_keys. But
+            // don't do this if the runs are trivially small.
             if (uncompacted_runs >= 8 &&
                 uncompacted_states >= 1000000) {
                 std::vector<KeyRun> to_compact = seen_keys.runs();
@@ -149,10 +198,12 @@ public:
 
             KeyStream stream(todo.first, todo.second);
 
+            // Process the actual new states from the last depth.
             while (stream.next()) {
                 State st(stream.value());
                 auto parent_hash = stream.value().hash();
 
+                // For each state collect the possible output states.
                 st.do_valid_moves(setup,
                                   [&new_states, &parent_hash, &win_state,
                                    &win]
@@ -167,6 +218,8 @@ public:
                                       }
                                       return false;
                                   });
+                // If we collect too many new states, do an
+                // intermediate deduplication + compression step now.
                 if (new_states.size() > 100000000) {
                     new_state_count += new_states.size();
                     pack_pairs(&new_states, &new_keys, &new_values);
@@ -180,6 +233,10 @@ public:
 
 
 private:
+    // Works backwards from the winning state to the start state,
+    // calling Policy::trace on each state. Note that this function
+    // takes advantage of the original seen_keys having one run per
+    // depth; it should not be called with compacted_seen_keys.
     int trace_solution_path(const Setup& setup,
                             const Keys& seen_keys,
                             const Values& seen_values,
@@ -192,6 +249,7 @@ private:
             Policy::trace(setup, State(target.first), i);
 
             auto runinfo = seen_keys.run(i - 1);
+            // Work through all the states at a given depth.
             KeyStream stream(runinfo.first, runinfo.second);
 
             bool found_next = false;
@@ -199,10 +257,19 @@ private:
                 const auto& key = stream.value();
                 st_pair current(key, 0);
 
+                // Look for states whose hash matches the value of
+                // the current states. (Since we've stored the hash
+                // of each state's parent in the value). This allows
+                // us to skip the full expensive test for all but
+                // one in 256 states.
                 if ((key.hash() & 0xff) != (target.second & 0xff)) {
                     continue;
                 }
 
+                // If the hashes matched, this is a potential parent
+                // of the current state. Try generating the output
+                // states for the potential parent, and check if any
+                // of them match the current one.
                 State st(key);
                 if (st.do_valid_moves(setup,
                                       [&target](State new_state) {
@@ -212,6 +279,8 @@ private:
                                           }
                                           return false;
                                       })) {
+                    // Got a match; set the potential parent as the
+                    // current state.
                     const auto& value = seen_values.run(i - 1).first[j];
                     target = st_pair(key, value);
                     found_next = true;
@@ -225,6 +294,13 @@ private:
         return depth - 1;
     }
 
+    // Given a vector of newly generated states+value pairs,
+    // deduplicates the states against other states in the same
+    // vector. If there are multiple pairs with identical states
+    // but different values, keeps an arbitrary pair.
+    //
+    // Writes the states (in sorted order) to new_keys.
+    // Writes the values (in the same order as the states) to new_values.
     void pack_pairs(NewStates* new_states, Keys* new_keys,
                     Values* new_values) {
         std::sort(new_states->begin(), new_states->end(),
@@ -254,6 +330,8 @@ private:
     }
 
 
+    // Given a vector of runs, generates a stream for the run
+    // and adds the stream to the given stream interleaver.
     template<class Stream, class Interleaver>
     void add_stream_runs(Interleaver* combiner,
                          const std::vector<KeyRun>& runs) {
@@ -265,30 +343,47 @@ private:
         }
     }
 
+    // Finds all states in new_keys that are not present in
+    // seen_keys_runs. Adds them to seen_keys as a new run.
     size_t dedup(Keys* seen_keys, Values* seen_values,
                  const std::vector<KeyRun>& seen_keys_runs,
                  const Keys& new_keys, const Values &new_values) {
+        // Set to true iff a state should be discarded due to the
+        // presence of an earlier duplicate.
         std::vector<bool> discard(new_values.size());
 
         using PairStream = StreamPairer<Key, Value, KeyStream, ValueStream>;
 
         if (new_keys.size()) {
+            // Process all the existing keys in order, rather than
+            // a run at a time.
             SortedStreamInterleaver<Key, KeyStream> seen_keys_stream;
-            SortedStreamInterleaver<Key, KeyStream> new_keys_stream;
             add_stream_runs<KeyStream>(&seen_keys_stream,
                                        seen_keys_runs);
+
+            // new_keys can have multiple runs if new_states got
+            // flushed early on. Process all the states in order too.
+            // (This is necessary, not just an optimization, since the
+            // same key can be present in multiple runs of new_keys.
+            // SortedStreamInterleaver will remove those duplicates for
+            // us.)
+            SortedStreamInterleaver<Key, KeyStream> new_keys_stream;
             add_stream_runs<KeyStream>(&new_keys_stream, new_keys.runs());
 
             new_keys_stream.next();
 
             size_t i = 0;
             while (seen_keys_stream.next()) {
+                // If the next new key is smaller than the current
+                // seen_key, keep the new key.
                 while (new_keys_stream.value() < seen_keys_stream.value()) {
                     if (!new_keys_stream.next()) {
+                        // Out of keys.
                         goto done;
                     }
                     ++i;
                 }
+                // If the next new key matches an old key, throw it away.
                 if (new_keys_stream.value() == seen_keys_stream.value()) {
                     discard[i] = true;
                 }
@@ -302,6 +397,8 @@ private:
         seen_keys->start_run();
         seen_values->start_run();
 
+        // Iterate through the new keys again, in the same order as above.
+        // But this time pair them up with the matching value.
         SortedStreamInterleaver<typename PairStream::Pair, PairStream>
             new_state_stream;
         for (int run = 0; run < new_keys.run_count(); ++run) {
@@ -317,6 +414,7 @@ private:
             }
         }
 
+        // Write out any keys + values that weren't marked for disposal.
         {
             KeyCompressor compress { seen_keys };
             for (int i = 0; new_state_stream.next(); ++i) {
@@ -335,6 +433,8 @@ private:
         return count;
     }
 
+    // Given a list of runs of states, merges the states together
+    // into one sorted run in output.
     size_t compact_runs(Keys* output,
                         const std::vector<KeyRun>& runs) {
         SortedStreamInterleaver<Key, KeyStream> stream;
