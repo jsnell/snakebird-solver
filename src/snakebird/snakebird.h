@@ -17,6 +17,17 @@ enum Direction {
     UP, RIGHT, DOWN, LEFT,
 };
 
+// A puzzle scenario description. All other classes are parametrized
+// with this.
+//
+// H: Map height
+// W: Map width
+// FruitCount: Number of initial fruit on the board.
+// SnakeCount: Number of initial Snakebirds on the board.
+// SnakeMaxLen: The maximum size that a Snakebird could theoretically
+//   grow to. (Normally the maximum initial length + number of fruit).
+// GadgetCount: Number of movable objects on the board.
+// TeleporterCount: Number of teleporters on the map.
 template<int H_, int W_, int FruitCount_,
          int SnakeCount_, int SnakeMaxLen_,
          int GadgetCount_=0, int TeleporterCount_=0>
@@ -51,9 +62,13 @@ struct Setup {
 
 // The dynamic representation of a Snakebird.
 //
-// H, W: The height and width of the map
-// MaxLen: The maximum number of segments any Snake could have
-//   in this scenario.
+// A Snakebird consists of a queue of segments, with each segment
+// being orthogonally adjacent to the others. As the Snakebird moves,
+// the head of the bird (i.e. segment 0) moves by one space to the
+// target space, and all the other segments move to the location
+// vacated by the previous segment. If a Snakebird grows, none of
+// the existing segments move. Instead a new segment is added to
+// the head of the queue.
 template<class Setup>
 class Snake {
 public:
@@ -70,6 +85,8 @@ public:
         i_[0] = i;
     }
 
+    // Extends the head of the snake in the given direction, without
+    // shortening the snake at the tail.
     void grow(Direction dir) {
         std::copy(&i_[0], &i_[len_], &i_[1]);
         i_[0] = i_[1] + Setup::apply_direction(dir);
@@ -77,6 +94,10 @@ public:
         tail_ = (tail_ << Setup::kDirBits) | dir;
     }
 
+    // Moves the head of the snake to the given direction; then
+    // moves the second segment of the snake to the space originally
+    // occupied by the head, the third segment to the space occupied
+    // by the second, etc.
     void move(Direction dir) {
         std::copy_backward(&i_[0], &i_[len_ - 1], &i_[len_]);
         i_[0] = i_[1] + Setup::apply_direction(dir);
@@ -84,12 +105,17 @@ public:
         tail_ = (tail_ << Setup::kDirBits) | dir;
     }
 
+    // Returns the directions the Snakebird has moved in (i==0 is
+    // the most recent move). May not be called with a number larger
+    // than len_ - 1.
     Direction tail(int i) const {
         return Direction((tail_ >> (i * Setup::kDirBits)) & Setup::kDirMask);
     }
 
+    // Compares to Snakebirds, based on their location and shape.
     bool operator<(const Snake& other) const {
-        // Doesn't matter which position gets compared.
+        // Doesn't matter which segment gets compared, as long as
+        // it's consistent.
         if (i_[0] != other.i_[0]) {
             return i_[0] < other.i_[0];
         }
@@ -102,6 +128,7 @@ public:
         return false;
     }
 
+    // Deserializes a Snakebird from bits.
     template<class P>
     void unpack(const P* packer, typename P::Context* pc) {
         packer->extract(tail_, kTailBits, pc);
@@ -110,6 +137,7 @@ public:
         init_locations_from_tail();
     }
 
+    // Serializes this Snakebird to bits.
     template<class P>
     void pack(P* packer, typename P::Context* pc) const {
         packer->deposit(tail_, kTailBits, pc);
@@ -117,36 +145,62 @@ public:
         packer->deposit(len_, Setup::kLenBits, pc);
     }
 
+    // The amount of bits needed to represent a Snakebird in
+    // this Setup.
     static constexpr uint64_t packed_width() {
         return kTailBits + Setup::kIndexBits + Setup::kLenBits;
     }
 
+    // Resets the location of all other segments of the Snakebird to
+    // be consistent with the shape and the location of the head.
     void init_locations_from_tail() {
         for (int i = 1; i < len_; ++i) {
             i_[i] = i_[i - 1] - Setup::apply_direction(tail(i - 1));
         }
     }
 
+    // Moves the Snakebird by delta steps (in the linear coordinate
+    // system). All segments of the Snakebird move by the same amount,
+    // so the shape does not change.
     void translate(int32_t delta) {
         for (int i = 0; i < len_; ++i) {
             i_[i] += delta;
         }
     }
 
+    // The last len_ - 1 directions given to move() and grow().
+    // Describes the shape of the Snakebird, independent of its
+    // location. Encoded as two bits per segment (matching the
+    // Direction enums). The most recent move is encoded in the
+    // least significant bits.
     uint64_t tail_;
+    // The locations (in the linear coordinate system) of each of the
+    // Snakebird's segments.
     int32_t i_[Setup::SnakeMaxLen];
+    // The number of segments the Snakebird consists of. Must be at least 2.
     int32_t len_;
 };
 
+// A Gadget is a movable object with a fixed shape. The parts
+// of the Gadget do not need to be contiguous.
+//
+// This class describes the shape and initial location of a Gadget.
+// As the Gadget is moved, the movement is tracked as a delta to
+// the initial location.
 class Gadget {
 public:
+    // Create a Gadget with no parts.
     Gadget() : size_(0) {
     }
 
-    void add(int i) {
-        i_[size_++] = i;
+    // Add a new part to the Gadget at the given linear coordinate
+    // offset compared to the first part. (I.e. the first part should
+    // always have an offset of 0).
+    void add(int offset) {
+        i_[size_++] = offset;
     }
 
+    // Compare two Gadgets, by shape and location.
     bool operator<(const Gadget& other) const {
         if (size_ != other.size_) {
             return size_ < other.size_;
@@ -163,22 +217,46 @@ public:
         return false;
     }
 
+    // The actual location of the first part of the Gadget in
+    // the initial setup.
     uint16_t initial_offset_ = 0;
+    // The number of parts in the gadget.
     uint16_t size_;
+    // The offset from this part to the first part of the Gadget.
     uint16_t i_[8];
 };
 
+// The dynamically changing parts of a movable object.
 struct GadgetState {
+    // An index to an array of Gadgets, which corresponds to the
+    // static setup of this object.
     uint16_t template_ ;
+    // The amount (in the linear coordinate system) by which this
+    // object has moved after the initial setup.
     uint16_t offset_ = 0;
 };
 
+// Any data that is immutable based on the scenario description,
+// and never changes between States.
+//
+// - The locations of solid ground, hazards, fruit, and teleporters.
+// - The shapes and initial locations of all movable objects.
+//
+// Also contains state that needs to be copied to the initial
+// state:
+//
+// - The shape and location of each Snakebird.
 template<class Setup>
 class Map {
 public:
     using Snake = typename ::Snake<Setup>;
     using Teleporter = typename std::pair<int, int>;
 
+    // Constructs a Map object from the given base map description.
+    // [O] is a fruit, [*] is an exit, [T] is a teleporter, [RGB] are
+    // the heads of Snakebirds; [<>v^] show the shape of the
+    // Snakebird; [0-9] are the parts of different gadgets, [.] is
+    // solid ground, [~#] are hazards.
     explicit Map(const char* base_map) : exit_(0) {
         assert(strlen(base_map) == Setup::MapSize);
         base_map_ = new uint8_t[Setup::MapSize];
@@ -280,6 +358,12 @@ public:
     Teleporter teleporters_[Setup::TeleporterCount];
 };
 
+// The serialization of a State object into a bitstream of kWidthBits
+// bits (rounded up to the next byte).
+//
+// All the serialization and deserialization happens with Packer; in
+// practice this is just convenience functions for operating on an
+// opaque byte array.
 template<class State, size_t kWidthBits>
 struct PackedState {
     using P = Packer<kWidthBits>;
@@ -291,20 +375,23 @@ struct PackedState {
         p_.flush(&pc);
     }
 
-    static constexpr int width_bytes() {
-        return P::Bytes;
-    }
-
+    // The size of the serialized output in bytes.
+    static constexpr int width_bytes() { return P::Bytes; }
+    // Returns the i'th element in the serialized state.
     uint8_t& at(size_t i) { return p_.bytes_[i]; }
     const uint8_t& at(size_t i) const { return p_.bytes_[i]; }
 
+    // Returns the full serialized state.
     uint8_t* bytes() { return p_.bytes_; }
     const uint8_t* bytes() const { return p_.bytes_; }
 
+    // Computes a hashcode for this state.
     uint64_t hash() const {
         return CityHash64((char*) bytes(),
                           width_bytes());
     }
+
+    // Compares two serialized states.
 
     bool operator==(const PackedState& other) const {
         return memcmp(bytes(), other.bytes(), P::Bytes) == 0;
@@ -313,9 +400,10 @@ struct PackedState {
     bool operator<(const PackedState& other) const {
         // This is morally a memcmp, but it's opencoded since we
         // don't care about what the ordering is, just that there
-        // is one. (The difference is due to endian issues).
+        // is one. (The difference is due to endian issues, which
+        // is why this kind of optimization can't happen automatically).
         //
-        // return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) < 0;
+        // return memcmp(bytes(), other.bytes(), P::Bytes) < 0;
         int i = 0;
         for (; i + 7 < P::Bytes; i += 8) {
             uint64_t a = *((uint64_t*) (bytes() + i));

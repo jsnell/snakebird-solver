@@ -10,7 +10,7 @@
 #include "file-backed-array.h"
 
 // A default policy class, with hook implementations that do nothing.
-template<class State, class Setup>
+template<class State, class FixedState>
 struct BFSPolicy {
     // Called at the start of each new depth of the breadth-first
     // search.
@@ -18,7 +18,7 @@ struct BFSPolicy {
     }
 
     // Called for every state on the solution that was found.
-    static void trace(const Setup& setup, const State& state, int depth) {
+    static void trace(const FixedState& setup, const State& state, int depth) {
     }
 };
 
@@ -72,17 +72,19 @@ struct BFSPolicy {
 // Template parameters.
 //
 // State: A node in the state graph. Must implement:
-// - do_valid_moves(const Setup& setup,
+// - do_valid_moves(const FixedState& setup,
 //                  std::function<bool(State)> fun) const
 //   Calls fun with all states that can be reached from this
 //   state.
 // - win(): Returns true if the state is in a win condition.
-// - print(const Setup& setup): Prints the state to stdout.
+// - print(const FixedState& setup): Prints the state to stdout.
 // - Must have a default constructor, which must represent a state
 //   that is not reachable from any other state.
 //
-// Setup: An opaque scenario description. A Setup object will be
-// threaded through all computations.
+// FixedState: An opaque scenario description, containing data that's
+// needed for interpreting the State objects but that's identical
+// between all states. A single FixedState object will be passed to
+// the main entry point, and threaded through all computations.
 //
 // Policy: Hook functions called at various point of the search
 // process. See BFSPolicy for the set of hooks that should be
@@ -96,8 +98,8 @@ struct BFSPolicy {
 // - operator< and operator==: PackedStates must have a total order.
 // - There must be mutual constructors from PackedState to State
 //   and vice versa.
-template<class State, class Setup,
-         class Policy = BFSPolicy<State, Setup>,
+template<class State, class FixedState,
+         class Policy = BFSPolicy<State, FixedState>,
          class PackedState = typename State::Packed,
          bool Compress = true>
 class BreadthFirstSearch {
@@ -131,7 +133,7 @@ public:
                                                    Keys>;
 
     // Execute a search from start_state to any win state.
-    int search(State start_state, const Setup& setup) {
+    int search(State start_state, const FixedState& setup) {
         State null_state;
 
         // BFS state
@@ -284,7 +286,7 @@ private:
     // calling Policy::trace on each state. Note that this function
     // takes advantage of the original seen_keys having one run per
     // depth; it should not be called with compacted_seen_keys.
-    int trace_solution_path(const Setup& setup,
+    int trace_solution_path(const FixedState& setup,
                             const Keys& seen_keys,
                             const Values& seen_values,
                             const st_pair win_state) {
