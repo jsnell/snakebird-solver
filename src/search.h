@@ -22,7 +22,54 @@ struct BFSPolicy {
     }
 };
 
-// Implements a breadth first search. Template arguments:
+// A breadth first search driven by the template parameters.
+//
+// This is not exactly a textbook implementation of a BFS. Instead
+// checking each output state against a hash table (or similar
+// structure) of previously seen states, this code processes the
+// whole depth in one go and collects up all the output states.
+// The set difference of these new states and the previously seen
+// states is then computed as a batch operation, producing the
+// states to use as input for the next depth.
+//
+// The main reason for doing the deduplication in a large batch is to
+// keep the memory footprint down. All data processing happens in a
+// streaming manner, there are essentially no random accesses at
+// all. This allows for keeping the state on disk when its size
+// exceeds the available physical memory, without totally destroying
+// performance. In addition the streaming access pattern + the
+// specific data structure used allows for compressing the data at
+// rest with very good compression ratios (10x), with decompression
+// happening as the data is streamed for reading.
+//
+// Despite memory footprint being the main reason for this variant
+// of the algorithm, it appears to be faster than the standard
+// hash table based variants on problems of non-trivial size, even
+// if all the data fits into memory. This is most likely due to
+// hash tables being very cache unfriendly, while the access pattern
+// used here is very easy for the hardware prefetcher to work with.
+//
+// Let's call a sorted sequence of states a run.
+//
+// - For each state generated at previous depth, generate all
+//   output depths. Collect them in a vector of new states.
+// - Sort + deduplicate the new states, generating a run.
+// - Iterate through the run of new states and all the runs of old
+//   states, in lock-step.
+// - If this iteration ever sees a state that's present in the
+//   new run but not in the old ones, collect that state. Since
+//   the runs are sorted, this is effectively a set difference
+//   operation.
+// - Add a new run to the collection of old states, consisting of
+//   the states kept in the last step.
+//
+// Since iterating through N sorted sequences with a total of M items
+// is an O(M log N) operation, we occasionally merge the old runs
+// together into one larger run. This is effectively a poor man's
+// log-structured merge tree.
+//
+//
+// Template parameters.
 //
 // State: A node in the state graph. Must implement:
 // - do_valid_moves(const Setup& setup,
