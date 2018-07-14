@@ -428,8 +428,100 @@ struct PackedState {
     P p_;
 };
 
-template<class Setup>
+template<class State, bool draw_tail=false>
+class ObjMap {
+public:
+    using Map = typename State::Map;
+    using Setup = typename State::Setup;
+    using Snake = typename State::Snake;
+
+    ObjMap(const State& st, const Map& map) {
+        draw_objs(st, map, draw_tail);
+    }
+
+    bool no_object_at(int i) const {
+        return obj_map_[i] == State::empty_id();
+    }
+
+    int fruit_id() const { return 1 + Setup::ObjCount; }
+    bool fruit_at(int i) const {
+        return obj_map_[i] == fruit_id();
+    }
+
+    bool foreign_object_at(int i, int id) const {
+        return !no_object_at(i) &&
+            obj_map_[i] != id;
+    }
+
+    int id_at(int i) const {
+        return obj_map_[i];
+    }
+    int mask_at(int i) const {
+        if (id_at(i)) {
+            return 1 << (id_at(i) - 1);
+        }
+        return 0;
+    }
+
+private:
+    void draw_objs(const State& st,
+                   const Map& map,
+                   bool draw_path) {
+        memset(obj_map_, State::empty_id(), Setup::MapSize);
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
+            draw_snake(st, si, draw_path);
+        }
+        for (int fi = 0; fi < Setup::FruitCount; ++fi) {
+            if (st.fruit_active(fi)) {
+                obj_map_[map.fruit_[fi]] = fruit_id();
+            }
+        }
+        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
+            int offset = st.gadgets_[gi].offset_;
+            if (offset != State::kGadgetDeleted) {
+                const auto& gadget = map.gadgets_[gi];
+                for (int j = 0; j < gadget.size_; ++j) {
+                    obj_map_[offset + gadget.i_[j]] = State::gadget_id(gi);
+                }
+            }
+        }
+    }
+
+    void draw_snake(const State& st, int si, bool draw_path) {
+        const Snake& snake = st.snakes_[si];
+        int id = State::snake_id(si);
+        if (draw_path) {
+            int i = snake.i_[0];
+            uint64_t tail = snake.tail_;
+            int segment = 0;
+            for (int j = 0; j < snake.len_; ++j) {
+                if (j == 0 || !draw_path) {
+                    obj_map_[i] = id;
+                } else {
+                    switch (segment) {
+                    case UP: obj_map_[i] = '^'; break;
+                    case DOWN: obj_map_[i] = 'v'; break;
+                    case LEFT: obj_map_[i] = '<'; break;
+                    case RIGHT: obj_map_[i] = '>'; break;
+                    }
+                }
+                segment = tail & Setup::kDirMask;
+                i -= Setup::apply_direction(tail & Setup::kDirMask);
+                tail >>= Setup::kDirBits;
+            }
+        } else {
+            for (int i = 0; i < snake.len_; ++i) {
+                obj_map_[snake.i_[i]] = id;
+            }
+        }
+    }
+
+    uint8_t obj_map_[Setup::MapSize];
+};
+
+template<class Setup_>
 class State {
+    using Setup = Setup_;
     using Snake = typename ::Snake<Setup>;
     using Teleporter = typename std::pair<int, int>;
 
@@ -470,7 +562,7 @@ public:
         static Direction dirs[] = {
             UP, RIGHT, DOWN, LEFT,
         };
-        ObjMap<> obj_map(*this, map);
+        ObjMap<State> obj_map(*this, map);
         uint32_t tele_mask = teleporter_overlap(map, obj_map);
         for (int si = 0; si < Setup::SnakeCount; ++si) {
             if (!snakes_[si].len_) {
@@ -479,7 +571,7 @@ public:
             // There has to be a cleaner way to do this...
             State push_st(*this);
             push_st.snakes_[si].len_--;
-            ObjMap<> push_map(push_st, map);
+            ObjMap<State> push_map(push_st, map);
             for (auto dir : dirs) {
                 int delta = Setup::apply_direction(dir);
                 int to = snakes_[si].i_[0] + delta;
@@ -536,7 +628,7 @@ public:
     }
 
     void print(const Map& map) const {
-        ObjMap<true> obj_map(*this, map);
+        ObjMap<State, true> obj_map(*this, map);
 
         for (int i = 0; i < Setup::H; ++i) {
             for (int j = 0; j < Setup::W; ++j) {
@@ -575,95 +667,11 @@ public:
 
 private:
     friend Packed;
+    friend ObjMap<State>;
+    friend ObjMap<State, true>;
 
     static const uint16_t kGadgetDeleted = 0;
 
-    template<bool draw_tail=false>
-    class ObjMap {
-    public:
-        ObjMap(const State& st, const Map& map) {
-            draw_objs(st, map, draw_tail);
-        }
-
-        bool no_object_at(int i) const {
-            return obj_map_[i] == empty_id();
-        }
-
-        int fruit_id() const { return 1 + Setup::ObjCount; }
-        bool fruit_at(int i) const {
-            return obj_map_[i] == fruit_id();
-        }
-
-        bool foreign_object_at(int i, int id) const {
-            return !no_object_at(i) &&
-                obj_map_[i] != id;
-        }
-
-        int id_at(int i) const {
-            return obj_map_[i];
-        }
-        int mask_at(int i) const {
-            if (id_at(i)) {
-                return 1 << (id_at(i) - 1);
-            }
-            return 0;
-        }
-
-    private:
-        void draw_objs(const State& st,
-                       const Map& map,
-                       bool draw_path) {
-            memset(obj_map_, empty_id(), Setup::MapSize);
-            for (int si = 0; si < Setup::SnakeCount; ++si) {
-                draw_snake(st, si, draw_path);
-            }
-            for (int fi = 0; fi < Setup::FruitCount; ++fi) {
-                if (st.fruit_active(fi)) {
-                    obj_map_[map.fruit_[fi]] = fruit_id();
-                }
-            }
-            for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
-                int offset = st.gadgets_[gi].offset_;
-                if (offset != kGadgetDeleted) {
-                    const auto& gadget = map.gadgets_[gi];
-                    for (int j = 0; j < gadget.size_; ++j) {
-                        obj_map_[offset + gadget.i_[j]] = gadget_id(gi);
-                    }
-                }
-            }
-        }
-
-        void draw_snake(const State& st, int si, bool draw_path) {
-            const Snake& snake = st.snakes_[si];
-            int id = snake_id(si);
-            if (draw_path) {
-                int i = snake.i_[0];
-                uint64_t tail = snake.tail_;
-                int segment = 0;
-                for (int j = 0; j < snake.len_; ++j) {
-                    if (j == 0 || !draw_path) {
-                        obj_map_[i] = id;
-                    } else {
-                        switch (segment) {
-                        case UP: obj_map_[i] = '^'; break;
-                        case DOWN: obj_map_[i] = 'v'; break;
-                        case LEFT: obj_map_[i] = '<'; break;
-                        case RIGHT: obj_map_[i] = '>'; break;
-                        }
-                    }
-                    segment = tail & Setup::kDirMask;
-                    i -= Setup::apply_direction(tail & Setup::kDirMask);
-                    tail >>= Setup::kDirBits;
-                }
-            } else {
-                for (int i = 0; i < snake.len_; ++i) {
-                    obj_map_[snake.i_[i]] = id;
-                }
-            }
-        }
-
-        uint8_t obj_map_[Setup::MapSize];
-    };
     static int empty_id() { return 0; }
     static int snake_id(int si) { return (1 + si); }
     static int snake_mask(int si) { return 1 << si; }
@@ -678,7 +686,8 @@ private:
         return (fruit_ & (1 << i)) != 0;
     }
 
-    uint32_t teleporter_overlap(const Map& map, const ObjMap<>& objmap) const {
+    uint32_t teleporter_overlap(const Map& map,
+                                const ObjMap<State>& objmap) const {
         uint32_t mask = 0;
         const uint32_t width = Setup::ObjCount;
         for (int ti = 0; ti < Setup::TeleporterCount; ++ti) {
@@ -690,7 +699,8 @@ private:
         return mask;
     }
 
-    void do_pushes(const ObjMap<>& obj_map, int pushed_ids, int push_delta) {
+    void do_pushes(const ObjMap<State>& obj_map,
+                   int pushed_ids, int push_delta) {
         for (int si = 0; si < Setup::SnakeCount; ++si) {
             if (pushed_ids & snake_mask(si)) {
                 snakes_[si].translate(push_delta);
@@ -704,7 +714,7 @@ private:
     }
 
     bool destroy_if_intersects_hazard(const Map& map,
-                                      const ObjMap<>& obj_map,
+                                      const ObjMap<State>& obj_map,
                                       int pushed_ids) {
         for (int si = 0; si < Setup::SnakeCount; ++si) {
             if (pushed_ids & snake_mask(si)) {
@@ -738,7 +748,7 @@ private:
     }
 
     bool is_valid_move(const Map& map,
-                       const ObjMap<>& obj_map,
+                       const ObjMap<State>& obj_map,
                        int to) const {
         if (obj_map.no_object_at(to) && empty_terrain_at(map, to)) {
             return true;
@@ -752,7 +762,7 @@ private:
     }
 
     bool is_valid_push(const Map& map,
-                       const ObjMap<>& obj_map,
+                       const ObjMap<State>& obj_map,
                        int pusher_id,
                        int push_at,
                        int delta,
@@ -807,7 +817,7 @@ private:
     }
 
     bool snake_can_be_pushed(const Map& map,
-                             const ObjMap<>& obj_map,
+                             const ObjMap<State>& obj_map,
                              int si,
                              int delta,
                              int* pushed_ids) const __attribute__((noinline)) {
@@ -831,7 +841,7 @@ private:
     }
 
     bool gadget_can_be_pushed(const Map& map,
-                              const ObjMap<>& obj_map,
+                              const ObjMap<State>& obj_map,
                               int gi,
                               int delta,
                               int* pushed_ids) const __attribute__((noinline)) {
@@ -854,7 +864,7 @@ private:
         return true;
     }
 
-    bool process_teleports(const Map& map, const ObjMap<>& obj_map,
+    bool process_teleports(const Map& map, const ObjMap<State>& obj_map,
                            uint32_t orig_tele_mask,
                            uint32_t new_tele_mask) {
         uint32_t only_new = new_tele_mask & ~orig_tele_mask;
@@ -896,7 +906,7 @@ private:
     }
 
     bool try_snake_teleport(const Map& map,
-                            const ObjMap<>& obj_map,
+                            const ObjMap<State>& obj_map,
                             int si, int delta) {
         const Snake& snake = snakes_[si];
 
@@ -920,7 +930,7 @@ private:
     }
 
     bool try_gadget_teleport(const Map& map,
-                             const ObjMap<>& obj_map,
+                             const ObjMap<State>& obj_map,
                              int gi,
                              int delta) {
         const auto& gadget = map.gadgets_[gi];
@@ -964,13 +974,13 @@ private:
         // 3. B is now on a teleporter. The remote side is not blocked
         //    by A. But B does not teleport.
         // Constructing more exact test cases is proving tricky.
-        ObjMap<> obj_map(*this, map);
+        ObjMap<State> obj_map(*this, map);
         uint32_t new_tele_mask = teleporter_overlap(map, obj_map);
         if (new_tele_mask & ~orig_tele_mask) {
             if (process_teleports(map, obj_map, orig_tele_mask,
                                   new_tele_mask)) {
                 orig_tele_mask = teleporter_overlap(map,
-                                                    ObjMap<>(*this, map));
+                                                    ObjMap<State>(*this, map));
                 goto again;
             }
         }
@@ -1072,7 +1082,7 @@ private:
     }
 
     int is_snake_falling(const Map& map,
-                         const ObjMap<>& obj_map,
+                         const ObjMap<State>& obj_map,
                          int si) const {
         const Snake& snake = snakes_[si];
         int pushed_ids = snake_mask(si);
@@ -1092,7 +1102,7 @@ private:
     }
 
     int is_gadget_falling(const Map& map,
-                          const ObjMap<>& obj_map,
+                          const ObjMap<State>& obj_map,
                           int gi) const {
         const auto& gadget = map.gadgets_[gi];
 
