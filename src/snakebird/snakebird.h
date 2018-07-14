@@ -280,12 +280,213 @@ public:
     Teleporter teleporters_[Setup::TeleporterCount];
 };
 
+template<class State, size_t kWidthBits>
+struct PackedState {
+    using P = Packer<kWidthBits>;
+
+    PackedState() {}
+    PackedState(const State& st) {
+        typename P::Context pc;
+        st.pack(&p_, &pc);
+        p_.flush(&pc);
+    }
+
+    static constexpr int width_bytes() {
+        return P::Bytes;
+    }
+
+    uint8_t& at(size_t i) { return p_.bytes_[i]; }
+    const uint8_t& at(size_t i) const { return p_.bytes_[i]; }
+
+    uint8_t* bytes() { return p_.bytes_; }
+    const uint8_t* bytes() const { return p_.bytes_; }
+
+    uint64_t hash() const {
+        return CityHash64((char*) bytes(),
+                          width_bytes());
+    }
+
+    bool operator==(const PackedState& other) const {
+        return memcmp(bytes(), other.bytes(), P::Bytes) == 0;
+    }
+
+    bool operator<(const PackedState& other) const {
+        // This is morally a memcmp, but it's opencoded since we
+        // don't care about what the ordering is, just that there
+        // is one. (The difference is due to endian issues).
+        //
+        // return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) < 0;
+        int i = 0;
+        for (; i + 7 < P::Bytes; i += 8) {
+            uint64_t a = *((uint64_t*) (bytes() + i));
+            uint64_t b = *((uint64_t*) (other.bytes() + i));
+            if (a != b)
+                return a < b;
+        }
+        for (; i + 3 < P::Bytes; i += 4) {
+            uint32_t a = *((uint32_t*) (bytes() + i));
+            uint32_t b = *((uint32_t*) (other.bytes() + i));
+            if (a != b)
+                return a < b;
+        }
+        for (; i < P::Bytes; ++i) {
+            if (at(i) != other.at(i)) {
+                return at(i) < other.at(i);
+            }
+        }
+        return false;
+    }
+
+    P p_;
+};
+
 template<class Setup>
 class State {
-public:
     using Snake = typename ::Snake<Setup>;
     using Teleporter = typename std::pair<int, int>;
+
+    static constexpr uint64_t packed_bits() {
+        return Snake::packed_width() * Setup::SnakeCount +
+            Setup::FruitCount +
+            Setup::kIndexBits * Setup::GadgetCount;
+    }
+
+public:
     using Map = typename ::Map<Setup>;
+    using Packed = PackedState<State, packed_bits()>;
+
+    State() {
+        fruit_ = mask_n_bits(Setup::FruitCount);
+        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
+            gadgets_[gi].template_ = gi;
+        }
+    }
+
+    State(const Map& map) : State() {
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
+            snakes_[si] = map.snakes_[si];
+        }
+        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
+            gadgets_[gi].offset_ = map.gadgets_[gi].initial_offset_;
+            gadgets_[gi].template_ = gi;
+        }
+    }
+
+    State(const Packed& p) : State() {
+        typename Packed::P::Context pc;
+        unpack(&p.p_, &pc);
+    };
+
+    bool do_valid_moves(const Map& map,
+                        std::function<bool(State)> fun) const {
+        static Direction dirs[] = {
+            UP, RIGHT, DOWN, LEFT,
+        };
+        ObjMap<> obj_map(*this, map);
+        uint32_t tele_mask = teleporter_overlap(map, obj_map);
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
+            if (!snakes_[si].len_) {
+                continue;
+            }
+            // There has to be a cleaner way to do this...
+            State push_st(*this);
+            push_st.snakes_[si].len_--;
+            ObjMap<> push_map(push_st, map);
+            for (auto dir : dirs) {
+                int delta = Setup::apply_direction(dir);
+                int to = snakes_[si].i_[0] + delta;
+                int pushed_ids = 0;
+                int fruit_index = 0;
+                if (is_valid_grow(map, to, &fruit_index)) {
+                    State new_state(*this);
+                    new_state.snakes_[si].grow(dir);
+                    new_state.delete_fruit(fruit_index);
+                    if (new_state.process_gravity(map, tele_mask)) {
+                        new_state.canonicalize(map);
+                        if (fun(new_state)) {
+                            return true;
+                        }
+                    }
+                } if (is_valid_move(map, obj_map, to)) {
+                    State new_state(*this);
+                    new_state.snakes_[si].move(dir);
+                    if (new_state.process_gravity(map, tele_mask)) {
+                        new_state.canonicalize(map);
+                        if (fun(new_state)) {
+                            return true;
+                        }
+                    }
+                } else if (is_valid_push(map, push_map,
+                                         snake_id(si),
+                                         snakes_[si].i_[0],
+                                         delta,
+                                         &pushed_ids) &&
+                           !(pushed_ids & snake_mask(si))) {
+                    State new_state(*this);
+                    new_state.snakes_[si].move(dir);
+                    new_state.do_pushes(obj_map, pushed_ids, delta);
+                    if (new_state.process_gravity(map, tele_mask)) {
+                        new_state.canonicalize(map);
+                        if (fun(new_state)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    bool win() {
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
+            if (snakes_[si].len_) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    void print(const Map& map) const {
+        ObjMap<true> obj_map(*this, map);
+
+        for (int i = 0; i < Setup::H; ++i) {
+            for (int j = 0; j < Setup::W; ++j) {
+                int l = i * Setup::W + j;
+                bool teleport = false;
+                for (auto t : map.teleporters_) {
+                    if (t.first == l || t.second == l) {
+                        teleport = true;
+                    }
+                }
+                if (!obj_map.no_object_at(l)) {
+                    int id = obj_map.id_at(l);
+                    char c;
+                    if (id < (Setup::SnakeCount + 1)) {
+                        c = 'A' + (id - 1);
+                    } else if (id < Setup::ObjCount + 1) {
+                        c = '0' + (id - 1 - Setup::SnakeCount);
+                    } else if (id == obj_map.fruit_id()) {
+                        c = 'Q';
+                    } else {
+                        c = id;
+                    }
+                    printf("%c", c);
+                } else if (l == map.exit_) {
+                    printf("*");
+                } else if (teleport) {
+                    printf("X");
+                } else {
+                    printf("%c", map[l]);
+                }
+            }
+            printf("\n");
+        }
+        printf("\n");
+    }
+
+private:
+    friend Packed;
 
     static const uint16_t kGadgetDeleted = 0;
 
@@ -381,142 +582,12 @@ public:
     static int gadget_id(int i) { return (1 + i + Setup::SnakeCount); }
     static int gadget_mask(int i) { return 1 << (Setup::SnakeCount + i); }
 
-    State() {
-        fruit_ = mask_n_bits(Setup::FruitCount);
-        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
-            gadgets_[gi].template_ = gi;
-        }
-    }
-
-    State(const Map& map) : State() {
-        for (int si = 0; si < Setup::SnakeCount; ++si) {
-            snakes_[si] = map.snakes_[si];
-        }
-        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
-            gadgets_[gi].offset_ = map.gadgets_[gi].initial_offset_;
-            gadgets_[gi].template_ = gi;
-        }
-    }
-
-    void print(const Map& map) const {
-        ObjMap<true> obj_map(*this, map);
-
-        for (int i = 0; i < Setup::H; ++i) {
-            for (int j = 0; j < Setup::W; ++j) {
-                int l = i * Setup::W + j;
-                bool teleport = false;
-                for (auto t : map.teleporters_) {
-                    if (t.first == l || t.second == l) {
-                        teleport = true;
-                    }
-                }
-                if (!obj_map.no_object_at(l)) {
-                    int id = obj_map.id_at(l);
-                    char c;
-                    if (id < (Setup::SnakeCount + 1)) {
-                        c = 'A' + (id - 1);
-                    } else if (id < Setup::ObjCount + 1) {
-                        c = '0' + (id - 1 - Setup::SnakeCount);
-                    } else if (id == obj_map.fruit_id()) {
-                        c = 'Q';
-                    } else {
-                        c = id;
-                    }
-                    printf("%c", c);
-                } else if (l == map.exit_) {
-                    printf("*");
-                } else if (teleport) {
-                    printf("X");
-                } else {
-                    printf("%c", map[l]);
-                }
-            }
-            printf("\n");
-        }
-        printf("\n");
-    }
-
     void delete_fruit(int i) {
         fruit_ = fruit_ & ~(1 << i);
     }
 
     bool fruit_active(int i) const {
         return (fruit_ & (1 << i)) != 0;
-    }
-
-    bool do_valid_moves(const Map& map,
-                        std::function<bool(State)> fun) const {
-        static Direction dirs[] = {
-            UP, RIGHT, DOWN, LEFT,
-        };
-        ObjMap<> obj_map(*this, map);
-        uint32_t tele_mask = teleporter_overlap(map, obj_map);
-        for (int si = 0; si < Setup::SnakeCount; ++si) {
-            if (!snakes_[si].len_) {
-                continue;
-            }
-            // There has to be a cleaner way to do this...
-            State push_st(*this);
-            push_st.snakes_[si].len_--;
-            ObjMap<> push_map(push_st, map);
-            for (auto dir : dirs) {
-                int delta = Setup::apply_direction(dir);
-                int to = snakes_[si].i_[0] + delta;
-                int pushed_ids = 0;
-                int fruit_index = 0;
-                if (is_valid_grow(map, to, &fruit_index)) {
-                    State new_state(*this);
-                    new_state.snakes_[si].grow(dir);
-                    new_state.delete_fruit(fruit_index);
-                    if (new_state.process_gravity(map, tele_mask)) {
-                        if (fun(new_state)) {
-                            return true;
-                        }
-                    }
-                } if (is_valid_move(map, obj_map, to)) {
-                    State new_state(*this);
-                    new_state.snakes_[si].move(dir);
-                    if (new_state.process_gravity(map, tele_mask)) {
-                        if (fun(new_state)) {
-                            return true;
-                        }
-                    }
-                } else if (is_valid_push(map, push_map,
-                                         snake_id(si),
-                                         snakes_[si].i_[0],
-                                         delta,
-                                         &pushed_ids) &&
-                           !(pushed_ids & snake_mask(si))) {
-                    State new_state(*this);
-                    new_state.snakes_[si].move(dir);
-                    new_state.do_pushes(obj_map, pushed_ids, delta);
-                    if (new_state.process_gravity(map, tele_mask)) {
-                        if (fun(new_state)) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
-    void canonicalize(const Map& map) {
-        std::sort(&snakes_[0], &snakes_[Setup::SnakeCount]);
-        if (Setup::GadgetCount > 0) {
-            std::sort(&gadgets_[0], &gadgets_[Setup::GadgetCount],
-                      [&map] (const GadgetState& a, const GadgetState& b) {
-                          const Gadget& ag = map.gadgets_[a.template_];
-                          const Gadget& bg = map.gadgets_[b.template_];
-                          if (ag < bg) {
-                              return true;
-                          }
-                          if (bg < ag) {
-                              return false;
-                          }
-                          return a.offset_ < b.offset_;
-                      });
-        }
     }
 
     uint32_t teleporter_overlap(const Map& map, const ObjMap<>& objmap) const {
@@ -877,6 +948,24 @@ public:
         return true;
     }
 
+    void canonicalize(const Map& map) {
+        std::sort(&snakes_[0], &snakes_[Setup::SnakeCount]);
+        if (Setup::GadgetCount > 0) {
+            std::sort(&gadgets_[0], &gadgets_[Setup::GadgetCount],
+                      [&map] (const GadgetState& a, const GadgetState& b) {
+                          const Gadget& ag = map.gadgets_[a.template_];
+                          const Gadget& bg = map.gadgets_[b.template_];
+                          if (ag < bg) {
+                              return true;
+                          }
+                          if (bg < ag) {
+                              return false;
+                          }
+                          return a.offset_ < b.offset_;
+                      });
+        }
+    }
+
     void check_exits(const Map& map) {
         if (fruit_) {
             // Can't use exits until all fruit are eaten.
@@ -892,16 +981,6 @@ public:
                 }
             }
         }
-    }
-
-    bool win() {
-        for (int si = 0; si < Setup::SnakeCount; ++si) {
-            if (snakes_[si].len_) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     int is_snake_falling(const Map& map,
@@ -977,76 +1056,6 @@ public:
 
         return false;
     }
-
-    static constexpr uint64_t packed_width() {
-        return Snake::packed_width() * Setup::SnakeCount +
-            Setup::FruitCount +
-            Setup::kIndexBits * Setup::GadgetCount;
-    }
-
-    struct Packed {
-        using P = Packer<packed_width()>;
-
-        Packed() {}
-        Packed(const State& st) {
-            typename P::Context pc;
-            st.pack(&p_, &pc);
-            p_.flush(&pc);
-        }
-
-        static constexpr int width_bytes() {
-            return P::Bytes;
-        }
-
-        uint8_t& at(size_t i) { return p_.bytes_[i]; }
-        const uint8_t& at(size_t i) const { return p_.bytes_[i]; }
-
-        uint8_t* bytes() { return p_.bytes_; }
-        const uint8_t* bytes() const { return p_.bytes_; }
-
-        uint64_t hash() const {
-            return CityHash64((char*) bytes(),
-                              width_bytes());
-        }
-
-        bool operator==(const Packed& other) const {
-            return memcmp(bytes(), other.bytes(), P::Bytes) == 0;
-        }
-
-        bool operator<(const Packed& other) const {
-            // This is morally a memcmp, but it's opencoded since we
-            // don't care about what the ordering is, just that there
-            // is one. (The difference is due to endian issues).
-            //
-            // return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) < 0;
-            int i = 0;
-            for (; i + 7 < P::Bytes; i += 8) {
-                uint64_t a = *((uint64_t*) (bytes() + i));
-                uint64_t b = *((uint64_t*) (other.bytes() + i));
-                if (a != b)
-                    return a < b;
-            }
-            for (; i + 3 < P::Bytes; i += 4) {
-                uint32_t a = *((uint32_t*) (bytes() + i));
-                uint32_t b = *((uint32_t*) (other.bytes() + i));
-                if (a != b)
-                    return a < b;
-            }
-            for (; i < P::Bytes; ++i) {
-                if (at(i) != other.at(i)) {
-                    return at(i) < other.at(i);
-                }
-            }
-            return false;
-        }
-
-        P p_;
-    };
-
-    State(const Packed& p) : State() {
-        typename Packed::P::Context pc;
-        unpack(&p.p_, &pc);
-    };
 
     template<class P>
     void unpack(const P* packer, typename P::Context* pc) {

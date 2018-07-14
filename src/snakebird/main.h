@@ -27,9 +27,6 @@
 
 template<class St, class Map>
 int search(St start_state, const Map& map) {
-    // Just in case the starting state is invalid.
-    start_state.process_gravity(map, 0);
-
     class SnakeBirdSearch {
     public:
         static void start_iteration(int depth) {

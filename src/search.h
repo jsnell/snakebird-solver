@@ -9,15 +9,44 @@
 #include "compress.h"
 #include "file-backed-array.h"
 
+// A default policy class, with hook implementations that do nothing.
 template<class State, class Setup>
 struct BFSPolicy {
+    // Called at the start of each new depth of the breadth-first
+    // search.
     static void start_iteration(int depth) {
     }
 
+    // Called for every state on the solution that was found.
     static void trace(const Setup& setup, const State& state, int depth) {
     }
 };
 
+// Implements a breadth first search. Template arguments:
+//
+// State: A node in the state graph. Must implement:
+// - do_valid_moves(const Setup& setup,
+//                  std::function<bool(State)> fun) const
+//   Calls fun with all states that can be reached from this
+//   state.
+// - win(): Returns true if the state is in a win condition.
+// - print(const Setup& setup): Prints the state to stdout.
+//
+// Setup: An opaque scenario description. A Setup object will be
+// threaded through all computations.
+//
+// Policy: Hook functions called at various point of the search
+// process. See BFSPolicy for the set of hooks that should be
+// defined.
+//
+// PackedState: A byte serialization of State.
+// - width_bytes(): Returns the maximum possible width of the
+//   serialization, for any possible state.
+// - bytes(): Returns a mutable array of width_bytes() bytes.
+// - hash(): Returns a hash code.
+// - operator< and operator==: PackedStates must have a total order.
+// - There must be mutual constructors from PackedState to State
+//   and vice versa.
 template<class State, class Setup,
          class Policy = BFSPolicy<State, Setup>,
          class PackedState = typename State::Packed,
@@ -126,9 +155,8 @@ public:
 
                 st.do_valid_moves(setup,
                                   [&new_states, &parent_hash, &win_state,
-                                   &win, &setup]
+                                   &win]
                                   (State new_state) {
-                                      new_state.canonicalize(setup);
                                       st_pair pair(new_state,
                                                    parent_hash & 0xff);
                                       new_states.push_back(pair);
@@ -177,8 +205,7 @@ private:
 
                 State st(key);
                 if (st.do_valid_moves(setup,
-                                      [&target, &setup](State new_state) {
-                                          new_state.canonicalize(setup);
+                                      [&target](State new_state) {
                                           Key p(new_state);
                                           if (p == target.first) {
                                               return true;
