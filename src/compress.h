@@ -307,7 +307,7 @@ public:
     // no more records can be read. Once this returns false, the only
     // method that may be called on this object is empty().
     bool next() {
-        if (!stream_.unpack(value_.p_.bytes_)) {
+        if (!stream_.unpack(value_.bytes())) {
             empty_ = true;
         }
         return !empty_;
@@ -324,7 +324,7 @@ private:
 
     T value_;
     bool empty_ = false;
-    ByteArrayDeltaDecompressor<sizeof(T::p_.bytes_), Decompress> stream_;
+    ByteArrayDeltaDecompressor<T::width_bytes(), Decompress> stream_;
 };
 
 

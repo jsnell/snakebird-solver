@@ -35,7 +35,7 @@ public:
 
     using KeyStream = StructureDeltaDecompressorStream<Key, Compress>;
     using ValueStream = PointerStream<Value>;
-    using KeyCompressor = ByteArrayDeltaCompressor<sizeof(Key::p_.bytes_),
+    using KeyCompressor = ByteArrayDeltaCompressor<Key::width_bytes(),
                                                    Compress,
                                                    Keys>;
 
@@ -215,7 +215,7 @@ private:
                     continue;
                 }
 
-                compress.pack(pair.first.p_.bytes_);
+                compress.pack(pair.first.bytes());
                 new_values->push_back(pair.second);
                 prev = pair.first;
             }
@@ -295,7 +295,7 @@ private:
             for (int i = 0; new_state_stream.next(); ++i) {
                 if (!discard[i]) {
                     ++count;
-                    compress.pack(new_state_stream.value().first.p_.bytes_);
+                    compress.pack(new_state_stream.value().first.bytes());
                     seen_values->push_back(new_state_stream.value().second);
                 }
             }
@@ -320,7 +320,7 @@ private:
         {
             KeyCompressor compress { output };
             for (; stream.next(); ++count) {
-                compress.pack(stream.value().p_.bytes_);
+                compress.pack(stream.value().bytes());
             }
         }
 

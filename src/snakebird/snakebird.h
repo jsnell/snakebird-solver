@@ -994,12 +994,23 @@ public:
             p_.flush(&pc);
         }
 
+        static constexpr int width_bytes() {
+            return P::Bytes;
+        }
+
+        uint8_t& at(size_t i) { return p_.bytes_[i]; }
+        const uint8_t& at(size_t i) const { return p_.bytes_[i]; }
+
+        uint8_t* bytes() { return p_.bytes_; }
+        const uint8_t* bytes() const { return p_.bytes_; }
+
         uint64_t hash() const {
-            return CityHash64((char*) p_.bytes_, sizeof(p_.bytes_));
+            return CityHash64((char*) bytes(),
+                              width_bytes());
         }
 
         bool operator==(const Packed& other) const {
-            return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) == 0;
+            return memcmp(bytes(), other.bytes(), P::Bytes) == 0;
         }
 
         bool operator<(const Packed& other) const {
@@ -1010,20 +1021,21 @@ public:
             // return memcmp(p_.bytes_, other.p_.bytes_, P::Bytes) < 0;
             int i = 0;
             for (; i + 7 < P::Bytes; i += 8) {
-                uint64_t a = *((uint64_t*) (p_.bytes_ + i));
-                uint64_t b = *((uint64_t*) (other.p_.bytes_ + i));
+                uint64_t a = *((uint64_t*) (bytes() + i));
+                uint64_t b = *((uint64_t*) (other.bytes() + i));
                 if (a != b)
                     return a < b;
             }
             for (; i + 3 < P::Bytes; i += 4) {
-                uint32_t a = *((uint32_t*) (p_.bytes_ + i));
-                uint32_t b = *((uint32_t*) (other.p_.bytes_ + i));
+                uint32_t a = *((uint32_t*) (bytes() + i));
+                uint32_t b = *((uint32_t*) (other.bytes() + i));
                 if (a != b)
                     return a < b;
             }
             for (; i < P::Bytes; ++i) {
-                if (p_.bytes_[i] != other.p_.bytes_[i])
-                    return p_.bytes_[i] < other.p_.bytes_[i];
+                if (at(i) != other.at(i)) {
+                    return at(i) < other.at(i);
+                }
             }
             return false;
         }
