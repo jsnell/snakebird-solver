@@ -1053,6 +1053,11 @@ private:
         return true;
     }
 
+    // For each object that's just moved to a teleporter (i.e. is
+    // in new_tele_mask but not in orig_tele_mask), move the
+    // object to the other side if possible.
+    //
+    // Returns true if any objects were teleported.
     bool process_teleports(const Map& map, const ObjMap<State>& obj_map,
                            ObjMask orig_tele_mask,
                            ObjMask new_tele_mask) {
@@ -1094,6 +1099,9 @@ private:
         return teleported;
     }
 
+    // Check if the snake would fit on the map if it were moved by the
+    // given delta. If so, move it and return true. Otherwise return
+    // false.
     bool try_snake_teleport(const Map& map,
                             const ObjMap<State>& obj_map,
                             int si, int delta) {
@@ -1118,6 +1126,9 @@ private:
         return true;
     }
 
+    // Check if the gadget would fit on the map if it were moved by
+    // the given delta. If so, move it and return true. Otherwise
+    // return false.
     bool try_gadget_teleport(const Map& map,
                              const ObjMap<State>& obj_map,
                              int gi,
@@ -1145,6 +1156,13 @@ private:
         return true;
     }
 
+    // Check whether any of the objects whose bits are set in the
+    // pushed_ids mask is intersecting a hazard.
+    //
+    // - A snake intersecting a hazard is a game over.
+    // - A gadget intersecting a hazard just gets destroyed.
+    //
+    // Returns true iff game over.
     bool destroy_if_intersects_hazard(const Map& map,
                                       const ObjMap<State>& obj_map,
                                       ObjMask pushed_ids) {
@@ -1164,9 +1182,21 @@ private:
         return false;
     }
 
+    // It is possible for two states to be functionally equal but
+    // have a different internal representation. This happens
+    // since two snakes of the same size, or two gadgets of the
+    // same shape are interchangable. Their exact identity never
+    // matters for the solution.
+    //
+    // Transforms the state (in-place) such that if S and S' are
+    // functionally equal but S != S', canonicalize(S) ==
+    // canonicalize(S').
     void canonicalize(const Map& map) {
+        // Sort the snakefs.
         std::sort(&snakes_[0], &snakes_[Setup::SnakeCount]);
         if (Setup::GadgetCount > 0) {
+            // Sort the gadgets primarily by shape, secondarily
+            // by offset.
             std::sort(&gadgets_[0], &gadgets_[Setup::GadgetCount],
                       [&map] (const GadgetState& a, const GadgetState& b) {
                           const Gadget& ag = map.gadgets_[a.template_];
@@ -1182,6 +1212,9 @@ private:
         }
     }
 
+    // Checks whether any snakes are in a position to exit the map.
+    // If so, marks them as having exited by setting the snake's
+    // length to 0.
     void check_exits(const Map& map) {
         if (fruit_) {
             // Can't use exits until all fruit are eaten.
@@ -1199,6 +1232,9 @@ private:
         }
     }
 
+    // If the snake is supported by the ground, returns zero.
+    // Otherwise returns a bitmask with 1 set for each object
+    // that might be supporting the snake + the snake itself.
     ObjMask is_snake_falling(const Map& map,
                              const ObjMap<State>& obj_map,
                              int si) const {
@@ -1219,6 +1255,9 @@ private:
         return pushed_ids;
     }
 
+    // If the gadget is supported by the ground or a spike, returns
+    // zero. Otherwise returns a bitmask with 1 set for each object
+    // that might be supporting the gadget + the gadget itself.
     ObjMask is_gadget_falling(const Map& map,
                               const ObjMap<State>& obj_map,
                               int gi) const {
@@ -1248,6 +1287,8 @@ private:
         return snake.i_[0] == map.exit_;
     }
 
+    // Returns true if a segment of the snake is located in a spike or
+    // a water location.
     bool snake_intersects_hazard(const Map& map, const Snake& snake) const {
         for (int i = 0; i < snake.len_; ++i) {
             int at = snake.i_[i];
@@ -1258,6 +1299,8 @@ private:
         return false;
     }
 
+    // Returns true if a part of the gadget is located in a water
+    // location.
     bool gadget_intersects_hazard(const Map& map,
                                   int gi) const {
         int offset = gadgets_[gi].offset_;
@@ -1273,6 +1316,7 @@ private:
         return false;
     }
 
+    // De-serialize the state.
     template<class P>
     void unpack(const P* packer, typename P::Context* pc) {
         for (int si = 0; si < Setup::SnakeCount; ++si) {
@@ -1286,6 +1330,7 @@ private:
         }
     }
 
+    // Serialize the state.
     template<class P>
     void pack(P* packer, typename P::Context* pc) const {
         for (int si = 0; si < Setup::SnakeCount; ++si) {
