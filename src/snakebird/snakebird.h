@@ -1,4 +1,11 @@
 // -*- mode: c++ -*-
+//
+// The game logic for the game Snakebird.
+//
+// All this code is specialized to the properies of a specific puzzle
+// instance (e.g. shape of map, number of objects).
+//
+//
 
 #ifndef GAME_H
 #define GAME_H
@@ -23,10 +30,10 @@ enum Direction {
 // H: Map height
 // W: Map width
 // FruitCount: Number of initial fruit on the board.
-// SnakeCount: Number of initial Snakebirds on the board.
-// SnakeMaxLen: The maximum size that a Snakebird could theoretically
+// SnakeCount: Number of initial snakes on the board.
+// SnakeMaxLen: The maximum size that a snake could theoretically
 //   grow to. (Normally the maximum initial length + number of fruit).
-// GadgetCount: Number of movable objects on the board.
+// GadgetCount: Number of other pushable objects on the board.
 // TeleporterCount: Number of teleporters on the map.
 template<int H_, int W_, int FruitCount_,
          int SnakeCount_, int SnakeMaxLen_,
@@ -60,13 +67,13 @@ struct Setup {
     }
 };
 
-// The dynamic representation of a Snakebird.
+// The dynamic representation of a snake.
 //
-// A Snakebird consists of a queue of segments, with each segment
-// being orthogonally adjacent to the others. As the Snakebird moves,
+// A snake consists of a queue of segments, with each segment
+// being orthogonally adjacent to the others. As the snake moves,
 // the head of the bird (i.e. segment 0) moves by one space to the
 // target space, and all the other segments move to the location
-// vacated by the previous segment. If a Snakebird grows, none of
+// vacated by the previous segment. If a snake grows, none of
 // the existing segments move. Instead a new segment is added to
 // the head of the queue.
 template<class Setup>
@@ -105,14 +112,14 @@ public:
         tail_ = (tail_ << Setup::kDirBits) | dir;
     }
 
-    // Returns the directions the Snakebird has moved in (i==0 is
+    // Returns the directions the snake has moved in (i==0 is
     // the most recent move). May not be called with a number larger
     // than len_ - 1.
     Direction tail(int i) const {
         return Direction((tail_ >> (i * Setup::kDirBits)) & Setup::kDirMask);
     }
 
-    // Compares to Snakebirds, based on their location and shape.
+    // Compares to snakes, based on their location and shape.
     bool operator<(const Snake& other) const {
         // Doesn't matter which segment gets compared, as long as
         // it's consistent.
@@ -128,7 +135,7 @@ public:
         return false;
     }
 
-    // Deserializes a Snakebird from bits.
+    // Deserializes a snake from bits.
     template<class P>
     void unpack(const P* packer, typename P::Context* pc) {
         packer->extract(tail_, kTailBits, pc);
@@ -137,7 +144,7 @@ public:
         init_locations_from_tail();
     }
 
-    // Serializes this Snakebird to bits.
+    // Serializes this snake to bits.
     template<class P>
     void pack(P* packer, typename P::Context* pc) const {
         packer->deposit(tail_, kTailBits, pc);
@@ -145,13 +152,13 @@ public:
         packer->deposit(len_, Setup::kLenBits, pc);
     }
 
-    // The amount of bits needed to represent a Snakebird in
+    // The amount of bits needed to represent a snake in
     // this Setup.
     static constexpr uint64_t packed_width() {
         return kTailBits + Setup::kIndexBits + Setup::kLenBits;
     }
 
-    // Resets the location of all other segments of the Snakebird to
+    // Resets the location of all other segments of the snake to
     // be consistent with the shape and the location of the head.
     void init_locations_from_tail() {
         for (int i = 1; i < len_; ++i) {
@@ -159,8 +166,8 @@ public:
         }
     }
 
-    // Moves the Snakebird by delta steps (in the linear coordinate
-    // system). All segments of the Snakebird move by the same amount,
+    // Moves the snake by delta steps (in the linear coordinate
+    // system). All segments of the snake move by the same amount,
     // so the shape does not change.
     void translate(int32_t delta) {
         for (int i = 0; i < len_; ++i) {
@@ -169,15 +176,15 @@ public:
     }
 
     // The last len_ - 1 directions given to move() and grow().
-    // Describes the shape of the Snakebird, independent of its
+    // Describes the shape of the snake, independent of its
     // location. Encoded as two bits per segment (matching the
     // Direction enums). The most recent move is encoded in the
     // least significant bits.
     uint64_t tail_;
     // The locations (in the linear coordinate system) of each of the
-    // Snakebird's segments.
+    // snake's segments.
     int32_t i_[Setup::SnakeMaxLen];
-    // The number of segments the Snakebird consists of. Must be at least 2.
+    // The number of segments the snake consists of. Must be at least 2.
     int32_t len_;
 };
 
@@ -245,7 +252,7 @@ struct GadgetState {
 // Also contains state that needs to be copied to the initial
 // state:
 //
-// - The shape and location of each Snakebird.
+// - The shape and location of each snake.
 template<class Setup>
 class Map {
 public:
@@ -254,8 +261,8 @@ public:
 
     // Constructs a Map object from the given base map description.
     // [O] is a fruit, [*] is an exit, [T] is a teleporter, [RGB] are
-    // the heads of Snakebirds; [<>v^] show the shape of the
-    // Snakebird; [0-9] are the parts of different gadgets, [.] is
+    // the heads of snakes; [<>v^] show the shape of the
+    // snake; [0-9] are the parts of different gadgets, [.] is
     // solid ground, [~#] are hazards.
     explicit Map(const char* base_map) : exit_(0) {
         assert(strlen(base_map) == Setup::MapSize);
@@ -429,10 +436,10 @@ struct PackedState {
 };
 
 // An index for all the the mutable parts of a State (Fruits,
-// Snakebirds, Gadgets), queryable my map coordinate.
+// snakes, Gadgets), queryable my map coordinate.
 //
 // If kDrawTail is true, uses [<>v^] to draw the exact shape of
-// Snakebirds rather than just marking the locations of the
+// snakes rather than just marking the locations of the
 // segments.
 template<class State, bool kDrawTail=false>
 class ObjMap {
@@ -554,8 +561,8 @@ public:
     using Map = typename ::Map<Setup>;
     using Packed = PackedState<State, packed_bits()>;
     // A bitmask of objects. Bits (0 : Setup::SnakeCount] are
-    // the Snakebirds, bits (Setup::SnakeCount : Setup::ObjCount]
-    // are Gadgets. Fruit are not tracked in the mask.
+    // the snakes, bits (Setup::SnakeCount : Setup::ObjCount]
+    // are gadgets. Fruit are not tracked in the mask.
     using ObjMask = uint32_t;
 
     // The null state.

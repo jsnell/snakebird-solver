@@ -1,28 +1,6 @@
 // -*- mode: c++ -*-
-
-#ifndef SEARCH_H
-#define SEARCH_H
-
-#include <algorithm>
-#include <vector>
-
-#include "compress.h"
-#include "file-backed-array.h"
-
-// A default policy class, with hook implementations that do nothing.
-template<class State, class FixedState>
-struct BFSPolicy {
-    // Called at the start of each new depth of the breadth-first
-    // search.
-    static void start_iteration(int depth) {
-    }
-
-    // Called for every state on the solution that was found.
-    static void trace(const FixedState& setup, const State& state, int depth) {
-    }
-};
-
-// A breadth first search driven by the template parameters.
+//
+// A breadth-first search.
 //
 // This is not exactly a textbook implementation of a BFS. Instead
 // checking each output state against a hash table (or similar
@@ -67,7 +45,31 @@ struct BFSPolicy {
 // is an O(M log N) operation, we occasionally merge the old runs
 // together into one larger run. This is effectively a poor man's
 // log-structured merge tree.
-//
+
+
+#ifndef SEARCH_H
+#define SEARCH_H
+
+#include <algorithm>
+#include <vector>
+
+#include "compress.h"
+#include "file-backed-array.h"
+
+// A default policy class, with hook implementations that do nothing.
+template<class State, class FixedState>
+struct BFSPolicy {
+    // Called at the start of each new depth of the breadth-first
+    // search.
+    static void start_iteration(int depth) {
+    }
+
+    // Called for every state on the solution that was found.
+    static void trace(const FixedState& setup, const State& state, int depth) {
+    }
+};
+
+// A breadth first search driven by the template parameters.
 //
 // Template parameters.
 //
