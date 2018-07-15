@@ -428,40 +428,58 @@ struct PackedState {
     P p_;
 };
 
-template<class State, bool draw_tail=false>
+// An index for all the the mutable parts of a State (Fruits,
+// Snakebirds, Gadgets), queryable my map coordinate.
+//
+// If kDrawTail is true, uses [<>v^] to draw the exact shape of
+// Snakebirds rather than just marking the locations of the
+// segments.
+template<class State, bool kDrawTail=false>
 class ObjMap {
 public:
     using Map = typename State::Map;
     using Setup = typename State::Setup;
     using Snake = typename State::Snake;
+    using ObjMask = typename State::ObjMask;
 
     ObjMap(const State& st, const Map& map) {
-        draw_objs(st, map, draw_tail);
+        draw_objs(st, map, kDrawTail);
     }
 
+    // Returns true if no objects overlap the given map coordinate.
     bool no_object_at(int i) const {
         return obj_map_[i] == State::empty_id();
     }
 
-    int fruit_id() const { return 1 + Setup::ObjCount; }
+    // Returns true if there is an (uneaten) fruit at the given map
+    // coordinate.
     bool fruit_at(int i) const {
         return obj_map_[i] == fruit_id();
     }
 
+    // Returns true if the given map coordinate contains an object
+    // (different from the given object id).
     bool foreign_object_at(int i, int id) const {
         return !no_object_at(i) &&
             obj_map_[i] != id;
     }
 
+    // Returns the id of the object at the given map coordinate.
     int id_at(int i) const {
         return obj_map_[i];
     }
-    int mask_at(int i) const {
+
+    // If the given map location contains an object, returns
+    // a bit-mask with the bit corresponding to that object set.
+    // Otherwise returns 0.
+    ObjMask mask_at(int i) const {
         if (id_at(i)) {
             return 1 << (id_at(i) - 1);
         }
         return 0;
     }
+
+    int fruit_id() const { return 1 + Setup::ObjCount; }
 
 private:
     void draw_objs(const State& st,
@@ -525,6 +543,7 @@ class State {
     using Snake = typename ::Snake<Setup>;
     using Teleporter = typename std::pair<int, int>;
 
+    // The size (in bits) of a serialized state object.
     static constexpr uint64_t packed_bits() {
         return Snake::packed_width() * Setup::SnakeCount +
             Setup::FruitCount +
@@ -534,7 +553,12 @@ class State {
 public:
     using Map = typename ::Map<Setup>;
     using Packed = PackedState<State, packed_bits()>;
+    // A bitmask of objects. Bits (0 : Setup::SnakeCount] are
+    // the Snakebirds, bits (Setup::SnakeCount : Setup::ObjCount]
+    // are Gadgets. Fruit are not tracked in the mask.
+    using ObjMask = uint32_t;
 
+    // The null state.
     State() {
         fruit_ = mask_n_bits(Setup::FruitCount);
         for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
@@ -542,6 +566,7 @@ public:
         }
     }
 
+    // The initial state.
     State(const Map& map) : State() {
         for (int si = 0; si < Setup::SnakeCount; ++si) {
             snakes_[si] = map.snakes_[si];
@@ -552,32 +577,47 @@ public:
         }
     }
 
+    // De-serializes a state from bytes.
     State(const Packed& p) : State() {
         typename Packed::P::Context pc;
         unpack(&p.p_, &pc);
     };
 
+    // Calls fun on states that can be directly reached from this
+    // state. Returns true immediately if fun returns true. Otherwise
+    // returns false.
     bool do_valid_moves(const Map& map,
                         std::function<bool(State)> fun) const {
         static Direction dirs[] = {
             UP, RIGHT, DOWN, LEFT,
         };
         ObjMap<State> obj_map(*this, map);
-        uint32_t tele_mask = teleporter_overlap(map, obj_map);
+        // Which objects overlap a teleporter before the move? (Needed
+        // since teleporters behave as edge triggered).
+        ObjMask tele_mask = teleporter_overlap(map, obj_map);
         for (int si = 0; si < Setup::SnakeCount; ++si) {
             if (!snakes_[si].len_) {
+                // This snake has already exited the level, can't move.
                 continue;
             }
-            // There has to be a cleaner way to do this...
+            // Make an ObjMap that's just like obj_map, but doesn't
+            // have the current snake's tail filled in. (Needed since
+            // the rules for how the tail is handled for movement vs
+            // pushing are different).
             State push_st(*this);
             push_st.snakes_[si].len_--;
             ObjMap<State> push_map(push_st, map);
+
             for (auto dir : dirs) {
+                // See what would happen when you move the current
+                // snake in each of the directions. (Grow snake, move
+                // snake to an empty space , or push one or more
+                // objects).
                 int delta = Setup::apply_direction(dir);
                 int to = snakes_[si].i_[0] + delta;
-                int pushed_ids = 0;
+                ObjMask pushed_ids = 0;
                 int fruit_index = 0;
-                if (is_valid_grow(map, to, &fruit_index)) {
+                if (is_valid_grow(map, obj_map, to, &fruit_index)) {
                     State new_state(*this);
                     new_state.snakes_[si].grow(dir);
                     new_state.delete_fruit(fruit_index);
@@ -600,8 +640,7 @@ public:
                                          snake_id(si),
                                          snakes_[si].i_[0],
                                          delta,
-                                         &pushed_ids) &&
-                           !(pushed_ids & snake_mask(si))) {
+                                         &pushed_ids)) {
                     State new_state(*this);
                     new_state.snakes_[si].move(dir);
                     new_state.do_pushes(obj_map, pushed_ids, delta);
@@ -617,6 +656,8 @@ public:
         return false;
     }
 
+    // Returns true if the state has reached the win condition.
+    // (I.e. all Snakes have exited the level).
     bool win() {
         for (int si = 0; si < Setup::SnakeCount; ++si) {
             if (snakes_[si].len_) {
@@ -627,6 +668,7 @@ public:
         return true;
     }
 
+    // Prints the game state to stdout.
     void print(const Map& map) const {
         ObjMap<State, true> obj_map(*this, map);
 
@@ -674,21 +716,27 @@ private:
 
     static int empty_id() { return 0; }
     static int snake_id(int si) { return (1 + si); }
-    static int snake_mask(int si) { return 1 << si; }
     static int gadget_id(int i) { return (1 + i + Setup::SnakeCount); }
-    static int gadget_mask(int i) { return 1 << (Setup::SnakeCount + i); }
 
-    void delete_fruit(int i) {
-        fruit_ = fruit_ & ~(1 << i);
-    }
+    static ObjMask snake_mask(int si) { return 1 << si; }
+    static ObjMask gadget_mask(int i) { return 1 << (Setup::SnakeCount + i); }
 
+    // Returns true if the i'th fruit is still unconsumed.
     bool fruit_active(int i) const {
         return (fruit_ & (1 << i)) != 0;
     }
 
-    uint32_t teleporter_overlap(const Map& map,
-                                const ObjMap<State>& objmap) const {
-        uint32_t mask = 0;
+    // Mark the i'th fruit as consumed.
+    void delete_fruit(int i) {
+        fruit_ = fruit_ & ~(1 << i);
+    }
+
+    // Returns a mask of all objects that currently overlap a
+    // teleporter. Each object will have one bit set for each
+    // half of each teleporter-pair.
+    ObjMask teleporter_overlap(const Map& map,
+                               const ObjMap<State>& objmap) const {
+        ObjMask mask = 0;
         const uint32_t width = Setup::ObjCount;
         for (int ti = 0; ti < Setup::TeleporterCount; ++ti) {
             mask |=
@@ -699,54 +747,8 @@ private:
         return mask;
     }
 
-    void do_pushes(const ObjMap<State>& obj_map,
-                   int pushed_ids, int push_delta) {
-        for (int si = 0; si < Setup::SnakeCount; ++si) {
-            if (pushed_ids & snake_mask(si)) {
-                snakes_[si].translate(push_delta);
-            }
-        }
-        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
-            if (pushed_ids & gadget_mask(gi)) {
-                gadgets_[gi].offset_ += push_delta;
-            }
-        }
-    }
-
-    bool destroy_if_intersects_hazard(const Map& map,
-                                      const ObjMap<State>& obj_map,
-                                      int pushed_ids) {
-        for (int si = 0; si < Setup::SnakeCount; ++si) {
-            if (pushed_ids & snake_mask(si)) {
-                if (snake_intersects_hazard(map, snakes_[si]))
-                    return true;
-            }
-        }
-        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
-            if (pushed_ids & gadget_mask(gi)) {
-                if (gadget_intersects_hazard(map, gi)) {
-                    gadgets_[gi].offset_ = kGadgetDeleted;
-                }
-            }
-        }
-        return false;
-    }
-
-    bool is_valid_grow(const Map& map,
-                       int to,
-                       int* fruit_index) const {
-        for (int fi = 0; fi < Setup::FruitCount; ++fi) {
-            int fruit = map.fruit_[fi];
-            if (fruit_active(fi) &&
-                fruit == to) {
-                *fruit_index = fi;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
+    // Returns true if a snake could move to the given location
+    // without pushing anything.
     bool is_valid_move(const Map& map,
                        const ObjMap<State>& obj_map,
                        int to) const {
@@ -761,28 +763,69 @@ private:
         return map[i] == ' ';
     }
 
+    // Returns true if a snake could grow by moving to the given
+    // location. If that's the case, sets fruit_index to the
+    // index of the fruit that would be eaten.
+    bool is_valid_grow(const Map& map,
+                       const ObjMap<State>& obj_map,
+                       int to,
+                       int* fruit_index) const {
+        if (!obj_map.fruit_at(to)) {
+            return false;
+        }
+
+        for (int fi = 0; fi < Setup::FruitCount; ++fi) {
+            int fruit = map.fruit_[fi];
+            if (fruit_active(fi) && fruit == to) {
+                *fruit_index = fi;
+                return true;
+            }
+        }
+
+        assert(false);
+    }
+
+    // Returns true if the snake at the index pusher_id could push
+    // an object at location push_at (with delta being the push
+    // direction). Otherwise returns false.
+    //
+    // The bit corresponding to each pushed object will be toggled on
+    // in pushed_ids.
     bool is_valid_push(const Map& map,
                        const ObjMap<State>& obj_map,
                        int pusher_id,
                        int push_at,
                        int delta,
-                       int* pushed_ids) const __attribute__((noinline)) {
+                       ObjMask* pushed_ids) const __attribute__((noinline)) {
         int to = push_at + delta;
 
-        if (obj_map.no_object_at(to) ||
+        if (// Nothing to push
+            obj_map.no_object_at(to) ||
+            // Object can't push itself.
             obj_map.id_at(to) == pusher_id ||
+            // Can't push fruit.
             obj_map.fruit_at(to)) {
             return false;
         }
 
+        // Initialize pushed_ids with the first candidate object
+        // to push.
         *pushed_ids = obj_map.mask_at(to);
         bool again = true;
 
+        // If object X is being pushed in direction D, and doing
+        // that would require pushing object Y too, add Y to
+        // the set as well. Repeat until no more objects get added
+        // to the set during an iteration.
+        //
+        // If it turns out that one of the objects in the set is
+        // not pushable, return false since the set as a whole can't
+        // move.
         while (again) {
             again = false;
             for (int si = 0; si < Setup::SnakeCount; ++si) {
                 if (*pushed_ids & snake_mask(si)) {
-                    int new_pushed_ids = 0;
+                    ObjMask new_pushed_ids = 0;
                     if (!snake_can_be_pushed(map, obj_map,
                                              si,
                                              delta,
@@ -797,7 +840,7 @@ private:
             }
             for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
                 if (*pushed_ids & gadget_mask(gi)) {
-                    int new_pushed_ids = 0;
+                    ObjMask new_pushed_ids = 0;
                     if (!gadget_can_be_pushed(map,
                                               obj_map,
                                               gi,
@@ -813,14 +856,19 @@ private:
             }
         }
 
-        return true;
+        // Don't allow the initiating object to push itself.
+        return !(*pushed_ids & snake_mask(pusher_id - 1));
     }
 
+    // Returns false if the snake at index si definitely can't be
+    // pushed in the direction of delta. If pushing the object would
+    // require pushing another object, mark that object in the
+    // pushed_ids mask.
     bool snake_can_be_pushed(const Map& map,
                              const ObjMap<State>& obj_map,
                              int si,
                              int delta,
-                             int* pushed_ids) const __attribute__((noinline)) {
+                             ObjMask* pushed_ids) const __attribute__((noinline)) {
         const Snake& snake = snakes_[si];
 
         for (int i = 0; i < snake.len_; ++i) {
@@ -840,11 +888,15 @@ private:
         return true;
     }
 
+    // Returns false if the gadget at index gi definitely can't be
+    // pushed in the direction of delta. If pushing the object would
+    // require pushing another object, mark that object in the
+    // pushed_ids mask.
     bool gadget_can_be_pushed(const Map& map,
                               const ObjMap<State>& obj_map,
                               int gi,
                               int delta,
-                              int* pushed_ids) const __attribute__((noinline)) {
+                              ObjMask* pushed_ids) const __attribute__((noinline)) {
         const auto& gadget = map.gadgets_[gi];
         int offset = gadgets_[gi].offset_;
 
@@ -864,11 +916,148 @@ private:
         return true;
     }
 
+    // Move all objects that are toggled in pushed_ids in the
+    // direction push_delta.
+    void do_pushes(const ObjMap<State>& obj_map,
+                   ObjMask pushed_ids, int push_delta) {
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
+            if (pushed_ids & snake_mask(si)) {
+                snakes_[si].translate(push_delta);
+            }
+        }
+        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
+            if (pushed_ids & gadget_mask(gi)) {
+                gadgets_[gi].offset_ += push_delta;
+            }
+        }
+    }
+
+    // Process the "physics", iteratively until there are no more
+    // changes.
+    //
+    // - Snakes that overlap an exit leave the map.
+    // - Objects that overlap a teleporter they didn't overlap
+    //   previously will teleport.
+    // - Objects that are not supported by the ground or a fruit
+    //   will drop down a state.
+    bool process_gravity(const Map& map, ObjMask orig_tele_mask)
+        __attribute__((noinline)) {
+        // A mask with a bit set for each object that might still
+        // be falling. Once an object reaches terra firma, it's
+        // bit is set to zero and it can be ignored on further
+        // iterations.
+        ObjMask recompute_falling = mask_n_bits(Setup::ObjCount);
+        // For each object O, contains a mask of the objects O' that
+        // are supporting this object. (I.e. O can only be falling
+        // if O' is also falling).
+        ObjMask falling[Setup::ObjCount];
+
+    again:
+        // FIXME. Figure out if exits and teleporters have different
+        // priority. Is it possible to construct a case where that
+        // matters?
+        check_exits(map);
+        // FIXME: The teleporter + gravity interaction doesn't quite
+        // match the actual game. There you can have the scenario where
+        // snake A supports snake B. Then:
+        // 1. A moves, and goes through a teleporter
+        // 2. Both A and B drop due to gravity
+        // 3. B is now on a teleporter. The remote side is not blocked
+        //    by A. But B does not teleport.
+        // Constructing more exact test cases is proving tricky.
+        ObjMap<State> obj_map(*this, map);
+        ObjMask new_tele_mask = teleporter_overlap(map, obj_map);
+        if (new_tele_mask & ~orig_tele_mask) {
+            if (process_teleports(map, obj_map, orig_tele_mask,
+                                  new_tele_mask)) {
+                orig_tele_mask = teleporter_overlap(map,
+                                                    ObjMap<State>(*this, map));
+                goto again;
+            }
+        }
+        orig_tele_mask = new_tele_mask;
+
+        // Recompute the supports for each object.
+        //
+        // supported will be set to 1 for any objects that are now on
+        // the ground. For objects that aren't, falling will be
+        // updated with a new mask of possibly supporting objects.
+        ObjMask supported = 0;
+        for (int si = 0; si < Setup::SnakeCount; ++si) {
+            ObjMask mask = 0;
+            if (snakes_[si].len_) {
+                if (recompute_falling & snake_mask(si)) {
+                    mask = is_snake_falling(map, obj_map, si);
+                }
+            }
+            falling[si] = mask;
+            if (!mask) {
+                supported |= snake_mask(si);
+            }
+        }
+        for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
+            int offset = gadgets_[gi].offset_;
+            ObjMask mask = 0;
+            if (offset != kGadgetDeleted) {
+                if (recompute_falling &
+                    gadget_mask(gi)) {
+                    mask = is_gadget_falling(map, obj_map, gi);
+                }
+            }
+            falling[Setup::SnakeCount + gi] = mask;
+            if (!mask) {
+                supported |= gadget_mask(gi);
+            }
+        }
+        recompute_falling = 0;
+
+        // Expand the supported set: for any object O that is not
+        // supported yet, check if any of its supporting objects O'
+        // are in the supported set. If at least one is, add O to
+        // the supported set.
+        //
+        // Iterate until no more objects are being added to the set.
+        while (1) {
+            bool again = false;
+            for (int i = 0; i < Setup::ObjCount; ++i) {
+                ObjMask mask = 1 << i;
+                if (!(supported & mask) &&
+                    (supported & falling[i])) {
+                    supported |= mask;
+                    again = true;
+                }
+            }
+            if (!again) {
+                break;
+            }
+        }
+
+        // Anything not in the supported set gets pushed down one
+        // step.
+        ObjMask to_push = mask_n_bits(Setup::ObjCount)
+            & ~supported;
+
+        if (to_push) {
+            do_pushes(obj_map, to_push, Setup::W);
+            // If the object dropping into the hazard would cause
+            // a game over situation, bail out.
+            if (destroy_if_intersects_hazard(map, obj_map, to_push)) {
+                return false;
+            }
+            // Recompute the situation for the objects that fell down
+            // this turn.
+            recompute_falling |= to_push;
+            goto again;
+        }
+
+        return true;
+    }
+
     bool process_teleports(const Map& map, const ObjMap<State>& obj_map,
-                           uint32_t orig_tele_mask,
-                           uint32_t new_tele_mask) {
-        uint32_t only_new = new_tele_mask & ~orig_tele_mask;
-        int test = 1;
+                           ObjMask orig_tele_mask,
+                           ObjMask new_tele_mask) {
+        ObjMask only_new = new_tele_mask & ~orig_tele_mask;
+        ObjMask test = 1;
         bool teleported = false;
         // This is over-engineered for the possibility of multiple
         // teleporters. But those don't actually appear in the game,
@@ -956,94 +1145,23 @@ private:
         return true;
     }
 
-    bool process_gravity(const Map& map, uint32_t orig_tele_mask)
-        __attribute__((noinline)) {
-        uint32_t recompute_falling = mask_n_bits(Setup::ObjCount);
-        uint32_t falling[Setup::ObjCount];
-
-    again:
-        // FIXME. Figure out if exits and teleporters have different
-        // priority. Is it possible to construct a case where that
-        // matters?
-        check_exits(map);
-        // FIXME: The teleporter + gravity interaction doesn't quite
-        // match the actual game. There you can have the scenario where
-        // snake A supports snake B. Then:
-        // 1. A moves, and goes through a teleporter
-        // 2. Both A and B drop due to gravity
-        // 3. B is now on a teleporter. The remote side is not blocked
-        //    by A. But B does not teleport.
-        // Constructing more exact test cases is proving tricky.
-        ObjMap<State> obj_map(*this, map);
-        uint32_t new_tele_mask = teleporter_overlap(map, obj_map);
-        if (new_tele_mask & ~orig_tele_mask) {
-            if (process_teleports(map, obj_map, orig_tele_mask,
-                                  new_tele_mask)) {
-                orig_tele_mask = teleporter_overlap(map,
-                                                    ObjMap<State>(*this, map));
-                goto again;
-            }
-        }
-        orig_tele_mask = new_tele_mask;
-
-        uint32_t supported = 0;
+    bool destroy_if_intersects_hazard(const Map& map,
+                                      const ObjMap<State>& obj_map,
+                                      ObjMask pushed_ids) {
         for (int si = 0; si < Setup::SnakeCount; ++si) {
-            int mask = 0;
-            if (snakes_[si].len_) {
-                if (recompute_falling &
-                    snake_mask(si)) {
-                    mask = is_snake_falling(map, obj_map, si);
-                }
-            }
-            falling[si] = mask;
-            if (!mask) {
-                supported |= snake_mask(si);
+            if (pushed_ids & snake_mask(si)) {
+                if (snake_intersects_hazard(map, snakes_[si]))
+                    return true;
             }
         }
         for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
-            int offset = gadgets_[gi].offset_;
-            int mask = 0;
-            if (offset != kGadgetDeleted) {
-                if (recompute_falling &
-                    gadget_mask(gi)) {
-                    mask = is_gadget_falling(map, obj_map, gi);
+            if (pushed_ids & gadget_mask(gi)) {
+                if (gadget_intersects_hazard(map, gi)) {
+                    gadgets_[gi].offset_ = kGadgetDeleted;
                 }
             }
-            falling[Setup::SnakeCount + gi] = mask;
-            if (!mask) {
-                supported |= gadget_mask(gi);
-            }
         }
-        recompute_falling = 0;
-
-        while (1) {
-            bool again = false;
-            for (int i = 0; i < Setup::ObjCount; ++i) {
-                int mask = 1 << i;
-                if (!(supported & mask) &&
-                    (supported & falling[i])) {
-                    supported |= mask;
-                    again = true;
-                }
-            }
-            if (!again) {
-                break;
-            }
-        }
-
-        uint32_t to_push = mask_n_bits(Setup::ObjCount)
-            & ~supported;
-
-        if (to_push) {
-            do_pushes(obj_map, to_push, Setup::W);
-            if (destroy_if_intersects_hazard(map, obj_map, to_push)) {
-                return false;
-            }
-            recompute_falling |= to_push;
-            goto again;
-        }
-
-        return true;
+        return false;
     }
 
     void canonicalize(const Map& map) {
@@ -1081,11 +1199,11 @@ private:
         }
     }
 
-    int is_snake_falling(const Map& map,
-                         const ObjMap<State>& obj_map,
-                         int si) const {
+    ObjMask is_snake_falling(const Map& map,
+                             const ObjMap<State>& obj_map,
+                             int si) const {
         const Snake& snake = snakes_[si];
-        int pushed_ids = snake_mask(si);
+        ObjMask pushed_ids = snake_mask(si);
 
         for (int i = 0; i < snake.len_; ++i) {
             int below = snake.i_[i] + Setup::W;
@@ -1101,12 +1219,12 @@ private:
         return pushed_ids;
     }
 
-    int is_gadget_falling(const Map& map,
-                          const ObjMap<State>& obj_map,
-                          int gi) const {
+    ObjMask is_gadget_falling(const Map& map,
+                              const ObjMap<State>& obj_map,
+                              int gi) const {
         const auto& gadget = map.gadgets_[gi];
 
-        int pushed_ids = gadget_mask(gi);
+        ObjMask pushed_ids = gadget_mask(gi);
         int id = gadget_id(gi);
 
         for (int j = 0; j < gadget.size_; ++j) {
