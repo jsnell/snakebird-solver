@@ -2,10 +2,45 @@
 //
 // The game logic for the game Snakebird.
 //
+// The game is played on a 2d map, with Snakebirds, fruit, and an
+// exit, with the goal being to have the Snakebirds eat all the fruit
+// and then leave by the exit.
+//
+//     ..........
+//     .    *   .
+//     .>B      .
+//     .^O    O .
+//     .  ~     .
+//     .  ~......
+//     ..... ....
+//     ....  ....
+//     . .    ...
+//     ~~~~~~~~~~
+//
+// The Snakebirds move in the cardinal directions. If a Snakebird moves
+// onto a fruit, the Snakebird will grow by one step. Otherwise all
+// segments of the snake will move forward by one step. If the Snakebird
+// moves on top of another Snakebird or some other movable object, the
+// object will be pushed in that direction (and will in turn push
+// other objects). A Snakebird can't push itself, directly or indirectly.
+//
+// A Snakebird or pushable object that is not supported from below by
+// the ground, another object, or a fruit, will drop down until it is
+// supported.
+//
+// Though the map is logically 2d, both the internal physical
+// representation and the external coordinate system are set up as
+// a row-major 1d array. For a map of size R*C, the top left is
+// represented by coordinate 0, the leftmost space of the second
+// row as C+1, and the bottom right as R*C-1.
+//
+// There is no bounds checking when e.g. checking the state of
+// neighboring spaces. Safety is ensured by having all maps be
+// surrounded by walls. These walls must be present in the original
+// ASCII drawing of a map; they will not be added in automatically.
+//
 // All this code is specialized to the properies of a specific puzzle
 // instance (e.g. shape of map, number of objects).
-//
-//
 
 #ifndef GAME_H
 #define GAME_H
@@ -24,6 +59,9 @@ enum Direction {
     UP, RIGHT, DOWN, LEFT,
 };
 
+// A row-major coordinate into the map.
+using Coord = int;
+
 // A puzzle scenario description. All other classes are parametrized
 // with this.
 //
@@ -35,12 +73,12 @@ enum Direction {
 //   grow to. (Normally the maximum initial length + number of fruit).
 // GadgetCount: Number of other pushable objects on the board.
 // TeleporterCount: Number of teleporters on the map.
-template<int H_, int W_, int FruitCount_,
+template<Coord H_, Coord W_, int FruitCount_,
          int SnakeCount_, int SnakeMaxLen_,
          int GadgetCount_=0, int TeleporterCount_=0>
 struct Setup {
-    static const int H = H_;
-    static const int W = W_;
+    static const Coord H = H_;
+    static const Coord W = W_;
     static const int FruitCount = FruitCount_;
     static const int SnakeCount = SnakeCount_;
     static const int SnakeMaxLen = SnakeMaxLen_;
@@ -57,13 +95,9 @@ struct Setup {
     static const int kLenBits = integer_length<SnakeMaxLen>::value;
 
     // Converting between directions and linear coordinate deltas.
-    static int apply_direction(Direction dir) {
-        static int deltas[] = { -W, 1, W, -1 };
+    static Coord apply_direction(Direction dir) {
+        static Coord deltas[] = { -W, 1, W, -1 };
         return deltas[dir];
-    }
-
-    static int apply_direction(int dir) {
-        return apply_direction(Direction(dir));
     }
 };
 
@@ -85,7 +119,7 @@ public:
         i_[0] = 0;
     }
 
-    Snake(int i)
+    Snake(Coord i)
         : tail_(0),
           len_(1) {
         assert(i < Setup::MapSize);
@@ -154,7 +188,7 @@ public:
 
     // The amount of bits needed to represent a snake in
     // this Setup.
-    static constexpr uint64_t packed_width() {
+    static constexpr int packed_width() {
         return kTailBits + Setup::kIndexBits + Setup::kLenBits;
     }
 
@@ -166,10 +200,9 @@ public:
         }
     }
 
-    // Moves the snake by delta steps (in the linear coordinate
-    // system). All segments of the snake move by the same amount,
-    // so the shape does not change.
-    void translate(int32_t delta) {
+    // Moves the snake by the given delta. All segments of the snake
+    // move by the same amount, so the shape does not change.
+    void translate(Coord delta) {
         for (int i = 0; i < len_; ++i) {
             i_[i] += delta;
         }
@@ -183,7 +216,7 @@ public:
     uint64_t tail_;
     // The locations (in the linear coordinate system) of each of the
     // snake's segments.
-    int32_t i_[Setup::SnakeMaxLen];
+    Coord i_[Setup::SnakeMaxLen];
     // The number of segments the snake consists of. Must be at least 2.
     int32_t len_;
 };
@@ -203,7 +236,7 @@ public:
     // Add a new part to the Gadget at the given linear coordinate
     // offset compared to the first part. (I.e. the first part should
     // always have an offset of 0).
-    void add(int offset) {
+    void add(Coord offset) {
         i_[size_++] = offset;
     }
 
@@ -226,11 +259,11 @@ public:
 
     // The actual location of the first part of the Gadget in
     // the initial setup.
-    uint16_t initial_offset_ = 0;
+    Coord initial_offset_ = 0;
     // The number of parts in the gadget.
     uint16_t size_;
     // The offset from this part to the first part of the Gadget.
-    uint16_t i_[8];
+    Coord i_[8];
 };
 
 // The dynamically changing parts of a movable object.
@@ -240,7 +273,7 @@ struct GadgetState {
     uint16_t template_ ;
     // The amount (in the linear coordinate system) by which this
     // object has moved after the initial setup.
-    uint16_t offset_ = 0;
+    Coord offset_ = 0;
 };
 
 // Any data that is immutable based on the scenario description,
@@ -257,7 +290,7 @@ template<class Setup>
 class Map {
 public:
     using Snake = typename ::Snake<Setup>;
-    using Teleporter = typename std::pair<int, int>;
+    using Teleporter = typename std::pair<Coord, Coord>;
 
     // Constructs a Map object from the given base map description.
     // [O] is a fruit, [*] is an exit, [T] is a teleporter, [RGB] are
@@ -271,8 +304,8 @@ public:
         int snake_count = 0;
         int teleporter_count = 0;
         int max_len = 0;
-        std::unordered_map<int, int> half_teleporter;
-        for (int i = 0; i < Setup::MapSize; ++i) {
+        std::unordered_map<int, Coord> half_teleporter;
+        for (Coord i = 0; i < Setup::MapSize; ++i) {
             const char c = base_map[i];
             if (c == 'O') {
                 if (Setup::FruitCount) {
@@ -328,7 +361,7 @@ public:
         assert(exit_);
     }
 
-    uint32_t trace_tail(const char* base_map, int i, int* len) const {
+    uint32_t trace_tail(const char* base_map, Coord i, int* len) const {
         if (base_map[i - 1] == '>') {
             ++*len;
             return RIGHT |
@@ -353,15 +386,20 @@ public:
         return 0;
     }
 
-    uint8_t operator[](int i) const {
+    uint8_t operator[](Coord i) const {
         return this->base_map_[i];
     }
 
     uint8_t* base_map_;
-    int exit_;
-    int fruit_[Setup::FruitCount];
+    // Location of the exit.
+    Coord exit_;
+    // Locations of any fruit.
+    Coord fruit_[Setup::FruitCount];
+    // Initial locations and shapes of snakes.
     Snake snakes_[Setup::SnakeCount];
+    // Initial locations and shapes of Gadgets.
     Gadget gadgets_[Setup::GadgetCount];
+    // Initial locations of any teleporter pairs.
     Teleporter teleporters_[Setup::TeleporterCount];
 };
 
@@ -454,32 +492,32 @@ public:
     }
 
     // Returns true if no objects overlap the given map coordinate.
-    bool no_object_at(int i) const {
+    bool no_object_at(Coord i) const {
         return obj_map_[i] == State::empty_id();
     }
 
     // Returns true if there is an (uneaten) fruit at the given map
     // coordinate.
-    bool fruit_at(int i) const {
+    bool fruit_at(Coord i) const {
         return obj_map_[i] == fruit_id();
     }
 
     // Returns true if the given map coordinate contains an object
     // (different from the given object id).
-    bool foreign_object_at(int i, int id) const {
+    bool foreign_object_at(Coord i, int id) const {
         return !no_object_at(i) &&
             obj_map_[i] != id;
     }
 
     // Returns the id of the object at the given map coordinate.
-    int id_at(int i) const {
+    int id_at(Coord i) const {
         return obj_map_[i];
     }
 
     // If the given map location contains an object, returns
     // a bit-mask with the bit corresponding to that object set.
     // Otherwise returns 0.
-    ObjMask mask_at(int i) const {
+    ObjMask mask_at(Coord i) const {
         if (id_at(i)) {
             return 1 << (id_at(i) - 1);
         }
@@ -502,7 +540,7 @@ private:
             }
         }
         for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
-            int offset = st.gadgets_[gi].offset_;
+            Coord offset = st.gadgets_[gi].offset_;
             if (offset != State::kGadgetDeleted) {
                 const auto& gadget = map.gadgets_[gi];
                 for (int j = 0; j < gadget.size_; ++j) {
@@ -516,9 +554,9 @@ private:
         const Snake& snake = st.snakes_[si];
         int id = State::snake_id(si);
         if (draw_path) {
-            int i = snake.i_[0];
+            Coord i = snake.i_[0];
             uint64_t tail = snake.tail_;
-            int segment = 0;
+            Direction segment;
             for (int j = 0; j < snake.len_; ++j) {
                 if (j == 0 || !draw_path) {
                     obj_map_[i] = id;
@@ -530,8 +568,8 @@ private:
                     case RIGHT: obj_map_[i] = '>'; break;
                     }
                 }
-                segment = tail & Setup::kDirMask;
-                i -= Setup::apply_direction(tail & Setup::kDirMask);
+                segment = Direction(tail & Setup::kDirMask);
+                i -= Setup::apply_direction(segment);
                 tail >>= Setup::kDirBits;
             }
         } else {
@@ -548,10 +586,10 @@ template<class Setup_>
 class State {
     using Setup = Setup_;
     using Snake = typename ::Snake<Setup>;
-    using Teleporter = typename std::pair<int, int>;
+    using Teleporter = typename std::pair<Coord, Coord>;
 
     // The size (in bits) of a serialized state object.
-    static constexpr uint64_t packed_bits() {
+    static constexpr int packed_bits() {
         return Snake::packed_width() * Setup::SnakeCount +
             Setup::FruitCount +
             Setup::kIndexBits * Setup::GadgetCount;
@@ -620,8 +658,8 @@ public:
                 // snake in each of the directions. (Grow snake, move
                 // snake to an empty space , or push one or more
                 // objects).
-                int delta = Setup::apply_direction(dir);
-                int to = snakes_[si].i_[0] + delta;
+                Coord delta = Setup::apply_direction(dir);
+                Coord to = snakes_[si].i_[0] + delta;
                 ObjMask pushed_ids = 0;
                 int fruit_index = 0;
                 if (is_valid_grow(map, obj_map, to, &fruit_index)) {
@@ -679,9 +717,9 @@ public:
     void print(const Map& map) const {
         ObjMap<State, true> obj_map(*this, map);
 
-        for (int i = 0; i < Setup::H; ++i) {
-            for (int j = 0; j < Setup::W; ++j) {
-                int l = i * Setup::W + j;
+        for (Coord i = 0; i < Setup::H; ++i) {
+            for (Coord j = 0; j < Setup::W; ++j) {
+                Coord l = i * Setup::W + j;
                 bool teleport = false;
                 for (auto t : map.teleporters_) {
                     if (t.first == l || t.second == l) {
@@ -729,13 +767,13 @@ private:
     static ObjMask gadget_mask(int i) { return 1 << (Setup::SnakeCount + i); }
 
     // Returns true if the i'th fruit is still unconsumed.
-    bool fruit_active(int i) const {
-        return (fruit_ & (1 << i)) != 0;
+    bool fruit_active(int fi) const {
+        return (fruit_ & (1 << fi)) != 0;
     }
 
     // Mark the i'th fruit as consumed.
-    void delete_fruit(int i) {
-        fruit_ = fruit_ & ~(1 << i);
+    void delete_fruit(int fi) {
+        fruit_ = fruit_ & ~(1 << fi);
     }
 
     // Returns a mask of all objects that currently overlap a
@@ -758,7 +796,7 @@ private:
     // without pushing anything.
     bool is_valid_move(const Map& map,
                        const ObjMap<State>& obj_map,
-                       int to) const {
+                       Coord to) const {
         if (obj_map.no_object_at(to) && empty_terrain_at(map, to)) {
             return true;
         }
@@ -766,7 +804,7 @@ private:
         return false;
     }
 
-    bool empty_terrain_at(const Map& map, int i) const {
+    bool empty_terrain_at(const Map& map, Coord i) const {
         return map[i] == ' ';
     }
 
@@ -775,14 +813,14 @@ private:
     // index of the fruit that would be eaten.
     bool is_valid_grow(const Map& map,
                        const ObjMap<State>& obj_map,
-                       int to,
+                       Coord to,
                        int* fruit_index) const {
         if (!obj_map.fruit_at(to)) {
             return false;
         }
 
         for (int fi = 0; fi < Setup::FruitCount; ++fi) {
-            int fruit = map.fruit_[fi];
+            Coord fruit = map.fruit_[fi];
             if (fruit_active(fi) && fruit == to) {
                 *fruit_index = fi;
                 return true;
@@ -801,10 +839,10 @@ private:
     bool is_valid_push(const Map& map,
                        const ObjMap<State>& obj_map,
                        int pusher_id,
-                       int push_at,
-                       int delta,
+                       Coord push_at,
+                       Coord delta,
                        ObjMask* pushed_ids) const __attribute__((noinline)) {
-        int to = push_at + delta;
+        Coord to = push_at + delta;
 
         if (// Nothing to push
             obj_map.no_object_at(to) ||
@@ -874,13 +912,13 @@ private:
     bool snake_can_be_pushed(const Map& map,
                              const ObjMap<State>& obj_map,
                              int si,
-                             int delta,
+                             Coord delta,
                              ObjMask* pushed_ids) const __attribute__((noinline)) {
         const Snake& snake = snakes_[si];
 
         for (int i = 0; i < snake.len_; ++i) {
             // The space the Snake's head would be pushed to.
-            int to = snake.i_[i] + delta;
+            Coord to = snake.i_[i] + delta;
             if (!empty_terrain_at(map, to)) {
                 return false;
             }
@@ -902,13 +940,13 @@ private:
     bool gadget_can_be_pushed(const Map& map,
                               const ObjMap<State>& obj_map,
                               int gi,
-                              int delta,
+                              Coord delta,
                               ObjMask* pushed_ids) const __attribute__((noinline)) {
         const auto& gadget = map.gadgets_[gi];
-        int offset = gadgets_[gi].offset_;
+        Coord offset = gadgets_[gi].offset_;
 
         for (int j = 0; j < gadget.size_; ++j) {
-            int i = gadget.i_[j] + offset + delta;
+            Coord i = gadget.i_[j] + offset + delta;
             if (!empty_terrain_at(map, i)) {
                 return false;
             }
@@ -926,7 +964,7 @@ private:
     // Move all objects that are toggled in pushed_ids in the
     // direction push_delta.
     void do_pushes(const ObjMap<State>& obj_map,
-                   ObjMask pushed_ids, int push_delta) {
+                   ObjMask pushed_ids, Coord push_delta) {
         for (int si = 0; si < Setup::SnakeCount; ++si) {
             if (pushed_ids & snake_mask(si)) {
                 snakes_[si].translate(push_delta);
@@ -1003,7 +1041,7 @@ private:
             }
         }
         for (int gi = 0; gi < Setup::GadgetCount; ++gi) {
-            int offset = gadgets_[gi].offset_;
+            Coord offset = gadgets_[gi].offset_;
             ObjMask mask = 0;
             if (offset != kGadgetDeleted) {
                 if (recompute_falling &
@@ -1078,7 +1116,7 @@ private:
         // same time, so it's just a guess that this is how they'd
         // work.
         for (int ti = 0; ti < Setup::TeleporterCount; ++ti) {
-            int delta = map.teleporters_[ti].second -
+            Coord delta = map.teleporters_[ti].second -
                 map.teleporters_[ti].first;
             for (int dir = 0; dir < 2; ++dir) {
                 for (int si = 0; si < Setup::SnakeCount; ++si) {
@@ -1111,11 +1149,11 @@ private:
     // false.
     bool try_snake_teleport(const Map& map,
                             const ObjMap<State>& obj_map,
-                            int si, int delta) {
+                            int si, Coord delta) {
         const Snake& snake = snakes_[si];
 
         for (int i = 0; i < snake.len_; ++i) {
-            int to = snake.i_[i] + delta;
+            Coord to = snake.i_[i] + delta;
             if (map[to] != ' ') {
                 return false;
             }
@@ -1139,12 +1177,12 @@ private:
     bool try_gadget_teleport(const Map& map,
                              const ObjMap<State>& obj_map,
                              int gi,
-                             int delta) {
+                             Coord delta) {
         const auto& gadget = map.gadgets_[gi];
-        int offset = gadgets_[gi].offset_ + delta;
+        Coord offset = gadgets_[gi].offset_ + delta;
 
         for (int j = 0; j < gadget.size_; ++j) {
-            int to = gadget.i_[j] + offset;
+            Coord to = gadget.i_[j] + offset;
             if (map[to] != ' ') {
                 return false;
             }
@@ -1249,7 +1287,7 @@ private:
         ObjMask pushed_ids = snake_mask(si);
 
         for (int i = 0; i < snake.len_; ++i) {
-            int below = snake.i_[i] + Setup::W;
+            Coord below = snake.i_[i] + Setup::W;
             if (map[below] == '.' ||
                 obj_map.fruit_at(below)) {
                 return 0;
@@ -1274,8 +1312,8 @@ private:
         int id = gadget_id(gi);
 
         for (int j = 0; j < gadget.size_; ++j) {
-            int at = gadget.i_[j] + gadgets_[gi].offset_;
-            int below = at + Setup::W;
+            Coord at = gadget.i_[j] + gadgets_[gi].offset_;
+            Coord below = at + Setup::W;
             if (map[below] == '.' ||
                 map[below] == '#' ||
                 obj_map.fruit_at(below)) {
@@ -1298,7 +1336,7 @@ private:
     // a water location.
     bool snake_intersects_hazard(const Map& map, const Snake& snake) const {
         for (int i = 0; i < snake.len_; ++i) {
-            int at = snake.i_[i];
+            Coord at = snake.i_[i];
             if (map[at] == '~' || map[at] == '#')
                 return true;
         }
@@ -1310,7 +1348,7 @@ private:
     // location.
     bool gadget_intersects_hazard(const Map& map,
                                   int gi) const {
-        int offset = gadgets_[gi].offset_;
+        Coord offset = gadgets_[gi].offset_;
         if (offset == kGadgetDeleted)
             return false;
         const auto& gadget = map.gadgets_[gi];
@@ -1353,6 +1391,7 @@ private:
 
     Snake snakes_[Setup::SnakeCount];
     GadgetState gadgets_[Setup::GadgetCount];
+    // Bitmask, fruit that are still on the map have the 1 bit set.
     uint64_t fruit_;
 };
 
