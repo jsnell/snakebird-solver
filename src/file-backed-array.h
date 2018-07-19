@@ -27,6 +27,7 @@ template<class T,
 class file_backed_mmap_array {
 public:
     file_backed_mmap_array() {
+        freeze();
     }
 
     file_backed_mmap_array(const file_backed_mmap_array& other) = delete;
@@ -182,6 +183,21 @@ public:
     int run_count() const {
         return run_ends_.size();
     }
+
+    struct WriteRun {
+        WriteRun(file_backed_mmap_array* array) : array_(array) {
+            array_->thaw();
+            array_->start_run();
+        }
+
+        ~WriteRun() {
+            array_->end_run();
+            array_->freeze();
+        }
+
+    private:
+        file_backed_mmap_array* array_;
+    };
 
 private:
     // If the array has a backing file, unmaps it. If truncate

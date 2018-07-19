@@ -87,12 +87,21 @@ struct SortedStreamInterleaver {
     // Registers "stream" as one of the component streams that
     // will be merged together. Takes ownership of the stream.
     void add_stream(Stream* stream) {
-        assert(stream->next());
-        streams_.push(stream);
+        if (stream->next()) {
+            streams_.push(stream);
+            empty_ = false;
+        } else {
+            delete stream;
+        }
+    }
+
+    bool empty() {
+        return empty_;
     }
 
     bool next() {
         if (streams_.empty()) {
+            empty_ = true;
             return false;
         }
 
