@@ -201,6 +201,8 @@ public:
             int uniq = dedup(&keys_by_depth, &values_by_depth, &all_keys,
                              new_keys, new_values);
             printf("  new unique: %d\n", uniq);
+            printf("  total size: %ld / %ld\n", all_keys.size(),
+                   values_by_depth.size());
 
             if (win) {
                 break;
