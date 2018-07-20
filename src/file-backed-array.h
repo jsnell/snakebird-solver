@@ -117,6 +117,7 @@ public:
     void insert_back(const It begin, const It end) {
         buffer_.insert(buffer_.end(), begin, end);
         size_ += std::distance(begin, end);
+        maybe_flush();
     }
 
     // Prepares the array for reading. No mutating operations
