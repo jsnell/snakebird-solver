@@ -1,0 +1,40 @@
+** Snakebird Solver
+
+This repository contains a C++ breadth-first solver for the delightful
+ puzzle game [[http://snakebird.noumenongames.com/][Snakebird]]. Theb
+ code is licensed under the MIT license, except for files under
+ third-party/src. For those files, see the files for licensing
+ information.
+
+Thanks to [[https://github.com/apocalyptech/snakebirdsolver][apocalyptech/snakebirdsolver]] for the idea on how to
+represent the Snakes in ASCII graphics in the puzzle definitions and
+pretty-printing, and for the level definitions.
+
+*** Performance
+
+The solver has a very optimized internal representation for game
+states, and for processing the game physics. Generating all the output
+states for an average state in the hardest puzzles of the game takes
+roughly 1-2 microseconds on an i7-6700k. The bulk of the program
+running time is spent in determining which of the output states had
+already been visited. 
+
+The representation of an individual state is usually about 8-10 bytes,
+but a data format + a combination of compression techniques compresses
+that down to an average of 0.7 bits.
+
+All memory access patterns are optimized with the assumption that the
+state will eventually spill to disk. So performance will not fall
+completely off the cliff even if the working set does not fit full in
+RAM. But the practical RAM requirements are actually pretty small even
+for the larger puzzles.
+
+To keep the state state manageable, the states are canonicalized in
+a way that eliminates as many symmetries as possible. In particular,
+the identity of objects or snakes is not tracked across states; the
+only things that matter are their shapes and locations. This
+canonicalization can have a dramatic effect on some puzzles.
+
+For example finding the solution to the star4 puzzle requires visiting
+about 36M states in its original state, but only 3.3M states after
+canonicalization.
